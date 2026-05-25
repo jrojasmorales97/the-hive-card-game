@@ -85,9 +85,19 @@ type LogSegment = {
   playerId?: string;
 };
 
+declare global {
+  interface Window {
+    __ENV?: Record<string, string> | undefined;
+  }
+}
+
 const SOCKET_URL =
-  import.meta.env.VITE_SOCKET_URL ??
-  (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001');
+  // runtime override injected by the container (env-config.js)
+  (typeof window !== 'undefined' ? window.__ENV?.VITE_SOCKET_URL : undefined) ||
+  // build-time Vite variable
+  (import.meta.env.VITE_SOCKET_URL ??
+    // fallback to current origin
+    (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001'));
 
 const STORAGE_KEYS = {
   playerId: 'th:playerId',
