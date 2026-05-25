@@ -1,14 +1,15 @@
-FROM node:20-alpine
+FROM node:20-alpine AS build
 
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install
+RUN npm install --production=false
 
 COPY . .
+RUN npm run build
 
-# Build and serve the production build. Render will run the container and expose the port.
-EXPOSE 5173
+FROM nginx:alpine
+COPY --from=build /app/dist /usr/share/nginx/html
 
-# At container start: build the app and run Vite preview on 0.0.0.0
-CMD ["sh", "-lc", "npm run build && npm run preview -- --host 0.0.0.0 --port 5173"]
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
