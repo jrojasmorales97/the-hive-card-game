@@ -1,0 +1,36 @@
+services:
+  backend:
+    build:
+      context: ./apps/backend
+      dockerfile: Dockerfile
+    container_name: thehive-backend
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - CLIENT_ORIGIN=*
+    volumes:
+      - ./apps/backend:/app
+      - /app/node_modules
+
+  frontend:
+    build:
+      context: ./apps/frontend
+      dockerfile: Dockerfile
+    container_name: thehive-frontend
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_PROXY_TARGET=http://backend:3001
+    depends_on:
+      - backend
+    volumes:
+      - ./apps/frontend:/app
+      - /app/node_modules
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: thehive-tunnel
+    command: tunnel --no-autoupdate --url http://frontend:5173
+    depends_on:
+      - frontend
