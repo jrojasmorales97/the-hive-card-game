@@ -6,7 +6,7 @@ const proxyTarget = process.env.VITE_PROXY_TARGET ?? 'http://localhost:3001';
 export default defineConfig({
   plugins: [react()],
   server: {
-    allowedHosts: ['.trycloudflare.com', '.loca.lt', 'localhost', '127.0.0.1'],
+    allowedHosts: ['.trycloudflare.com', '.loca.lt', '.onrender.com', 'localhost', '127.0.0.1'],
     proxy: {
       '/socket.io': {
         target: proxyTarget,
