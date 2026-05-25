@@ -1,0 +1,22 @@
+services:
+  - type: web_service
+    name: the-hive-backend
+    env: node
+    root: apps/backend
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: PORT
+        value: "3001"
+      - key: CLIENT_ORIGIN
+        value: "https://the-hive-frontend.onrender.com"
+
+  - type: static_site
+    name: the-hive-frontend
+    env: node
+    root: apps/frontend
+    buildCommand: npm install && npm run build
+    publishPath: dist
+    envVars:
+      - key: VITE_SOCKET_URL
+        value: "https://the-hive-backend.onrender.com"

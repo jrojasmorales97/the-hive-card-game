@@ -1354,12 +1354,12 @@ export function App() {
                           {eventOverlay.errorData.playedCard.value}
                         </span>{' '}
                         {'>'}{' '}
-                        {eventOverlay.errorData.blockingCards.map((card, idx) => (
+                        {(eventOverlay.errorData.blockingCards ?? []).map((card, idx) => (
                           <span key={`${card.playerId}-${card.value}-${idx}`}>
                             <span className="error-number" style={{ color: playerColorMap.get(card.playerId) }}>
                               {card.value}
                             </span>
-                            {idx < eventOverlay.errorData.blockingCards.length - 1 ? ', ' : ''}
+                            {idx < ((eventOverlay.errorData?.blockingCards.length ?? 0) - 1) ? ', ' : ''}
                           </span>
                         ))}
                       </p>
