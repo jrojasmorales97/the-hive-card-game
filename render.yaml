@@ -1,6 +1,6 @@
 services:
   - type: web_service
-    name: the-hive-backend
+    name: the-hive-card-game-backend
     env: node
     root: apps/backend
     buildCommand: npm install && npm run build
@@ -9,14 +9,14 @@ services:
       - key: PORT
         value: "3001"
       - key: CLIENT_ORIGIN
-        value: "https://the-hive-frontend.onrender.com"
+        value: "https://the-hive-card-game.onrender.com"
 
   - type: static_site
-    name: the-hive-frontend
+    name: the-hive-card-game
     env: node
     root: apps/frontend
     buildCommand: npm install && npm run build
     publishPath: dist
     envVars:
       - key: VITE_SOCKET_URL
-        value: "https://the-hive-backend.onrender.com"
+        value: "https://the-hive-card-game-backend.onrender.com"
