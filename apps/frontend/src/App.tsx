@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-// useLayoutEffect alias — avoids SSR warnings while being semantically clear
+// useLayoutEffect alias - avoids SSR warnings while being semantically clear
 import { io, Socket } from 'socket.io-client';
 
 type Player = {
@@ -106,6 +106,9 @@ const STORAGE_KEYS = {
 };
 
 const PLAYER_PALETTE = ['#2EEBFF', '#FF2FAE', '#FFCC00', '#FFFFFF'] as const;
+const QUEUE_SLOT_COUNT = 11;
+const RIVAL_POSITIONS = ['corner-top-left', 'corner-top-right', 'corner-bottom-left'] as const;
+const SELF_POSITION = 'corner-bottom-right' as const;
 
 const REWARDS: Record<number, 'life' | 'star'> = {
   2: 'star',
@@ -117,19 +120,19 @@ const REWARDS: Record<number, 'life' | 'star'> = {
 };
 
 const MSG = {
-  focus: ['Breathe… and trust the rhythm.', 'Mental silence. Magic begins.', 'No rush. No pause.'],
+  focus: ['Breathe and trust the rhythm.', 'Silence first. Timing second.', 'The round is waiting for calm.'],
   playing: [
-    'Your lowest card is calling.',
-    'Is it time? Play with calm.',
+    'Your lowest card is ready.',
+    'Read the table and trust the timing.',
     'Lowest first. Always.',
-    'Feel the team\'s tempo.',
+    'Play with the team, not against the clock.',
   ],
-  waiting: ['Hold on… the team is syncing.', 'Waiting for the perfect signal.', 'Patience: every second counts.'],
-  paused: ['Tactical pause. Refocus.', 'Timeout. Back to the rhythm.', 'Reconcentration in progress.'],
-  starUsed: ['Total consensus. Star activated!', 'Ninja mode: minimum cards out.', 'Perfect team. Clean move.'],
-  levelComplete: ['Level cleared, machine!', 'Excellent team sync.', 'Fine rhythm, level done.'],
-  victory: ['CONNECTED MINDS! 🏆', 'Flawless victory. What a team!', 'Master level unlocked.'],
-  defeat: ['Not today. Stronger tomorrow.', 'We fell together, we learned together.', 'Defeat… but with style.'],
+  waiting: ['Hold steady. The team is syncing.', 'The next beat is close.', 'Patience is part of the play.'],
+  paused: ['Tactical pause. Reset the table.', 'Pause called. Regroup and refocus.', 'Hold for the team.'],
+  starUsed: ['Full agreement. Star resolved.', 'Lowest cards cleared together.', 'Clean team move.'],
+  levelComplete: ['Level cleared.', 'Strong team timing.', 'The round is yours.'],
+  victory: ['Connected minds.', 'Flawless finish.', 'The Hive holds together.'],
+  defeat: ['Not this run. Learn the rhythm.', 'The table wins today.', 'Reset and go again.'],
 };
 
 function buildPlayerColorMap(players: Player[]): Map<string, string> {
@@ -165,7 +168,6 @@ function getRoomCodeFromUrl(): string {
   const code = new URLSearchParams(window.location.search).get('room') ?? '';
   return code.trim().toUpperCase();
 }
-
 function buildShareUrl(roomCode: string): string {
   if (typeof window === 'undefined') return '';
   const url = new URL(window.location.href);
@@ -175,19 +177,37 @@ function buildShareUrl(roomCode: string): string {
 
 function rewardLabel(level: number): string {
   const reward = REWARDS[level];
-  if (!reward) return '—';
-  return reward === 'life' ? '+1 Life ❤️' : '+1 Star ⭐';
+  if (!reward) return 'No reward';
+  return reward === 'life' ? '+1 Life' : '+1 Star';
+}
+
+function rewardTypeLabel(reward: LevelReward): string {
+  if (reward === 'life') return '+1 Life';
+  if (reward === 'star') return '+1 Star';
+  return '';
+}
+
+function rewardTypeIcon(reward: LevelReward): string {
+  return reward === 'life' ? 'favorite' : 'star';
 }
 
 type ConnectionState = 'connected' | 'reconnecting' | 'disconnected';
 
 function statusIconForSeat(player: Player, gamePhase?: GamePhase): string {
   if (!player.connected) return 'signal_wifi_off';
+  if (gamePhase === 'paused') return 'pause_circle';
   if (gamePhase === 'playing') return 'style';
   if (player.ready) return 'task_alt';
   return 'hourglass_top';
 }
 
+function statusLabelForSeat(player: Player, gamePhase?: GamePhase): string {
+  if (!player.connected) return 'Offline';
+  if (gamePhase === 'paused') return 'Paused';
+  if (gamePhase === 'playing') return 'Playing';
+  if (player.ready) return 'Ready';
+  return 'Waiting';
+}
 function connectionLabel(state: ConnectionState): string {
   return (
     {
@@ -198,7 +218,29 @@ function connectionLabel(state: ConnectionState): string {
   );
 }
 
-function pileStyle(index: number, value: number) {
+type PileEntryOffset = {
+  x: number;
+  y: number;
+  rot: number;
+};
+
+type StatusPulse = 'up' | 'down' | null;
+
+function pileEntryOffset(corner: string): PileEntryOffset {
+  switch (corner) {
+    case 'corner-top-left':
+      return { x: -220, y: -170, rot: -18 };
+    case 'corner-top-right':
+      return { x: 220, y: -170, rot: 18 };
+    case 'corner-bottom-left':
+      return { x: -220, y: 190, rot: -14 };
+    case 'corner-bottom-right':
+    default:
+      return { x: 220, y: 190, rot: 14 };
+  }
+}
+
+function pileStyle(index: number, value: number, entry: PileEntryOffset) {
   const seed = (value * 9301 + 49297) % 233280;
   const rnd = seed / 233280;
   const x = Math.round((rnd - 0.5) * 42);
@@ -209,6 +251,9 @@ function pileStyle(index: number, value: number) {
     '--x': `${x}px`,
     '--y': `${y}px`,
     '--rot': `${rot}deg`,
+    '--entry-x': `${entry.x}px`,
+    '--entry-y': `${entry.y}px`,
+    '--entry-rot': `${entry.rot}deg`,
     '--z': `${index + 1}`,
   } as any;
 }
@@ -310,7 +355,7 @@ function logSegments(entry: GameLogEvent): LogSegment[] {
     case 'game:level-complete':
       return [{ text: `Level ${p.levelCompleted ?? '?'} cleared` }];
     case 'game:reward':
-      return [{ text: `Reward earned: ${p.reward === 'life' ? 'life' : p.reward === 'star' ? 'star' : '—'}` }];
+      return [{ text: `Reward earned: ${p.reward === 'life' ? 'life' : p.reward === 'star' ? 'star' : 'none'}` }];
     case 'game:next-level-ready':
       return [{ text: `Round ${p.level ?? '?'} ready` }];
     case 'game:restarted':
@@ -328,7 +373,7 @@ const RULES = [
   {
     icon: 'hub',
     title: 'The Goal',
-    body: 'Play all 100 cards in ascending order as a team — in complete silence. No talking, no signals, no gestures. Only shared instinct.',
+    body: 'Play all 100 cards in ascending order as a team - in complete silence. No talking, no signals, no gestures. Only shared instinct.',
   },
   {
     icon: 'style',
@@ -338,7 +383,7 @@ const RULES = [
   {
     icon: 'task_alt',
     title: 'Ready & Pause',
-    body: 'Before each round starts, every player must press Ready. Any player can call a Pause mid-game — the round resumes only when everyone marks Ready again.',
+    body: 'Before each round starts, every player must press Ready. Any player can call a Pause mid-game - the round resumes only when everyone marks Ready again.',
   },
   {
     icon: 'auto_awesome',
@@ -474,7 +519,7 @@ function HeroSection() {
     <div className="hero">
       <div className="hero-inner">
         <HeroTitle />
-        <p className="hero-tagline">No talking · No signaling · In order</p>
+        <p className="hero-tagline">No talking | No signaling | In order</p>
       </div>
     </div>
   );
@@ -493,18 +538,19 @@ export function App() {
   const [eventOverlay, setEventOverlay] = useState<EventOverlay | null>(null);
   const [gameLog, setGameLog] = useState<GameLogEvent[]>([]);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
-  const [showAllCards, setShowAllCards] = useState(true);
+  const [logOpen, setLogOpen] = useState(false);
   const [accessBusy, setAccessBusy] = useState(false);
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
   const [countdown, setCountdown] = useState<3 | 2 | 1 | 'play' | null>(null);
   const [dealtHandCount, setDealtHandCount] = useState(0);
   const [isClearingPile, setIsClearingPile] = useState(false);
-  const [lastPlayedToast, setLastPlayedToast] = useState<{ value: number; playerName: string; playerId: string } | null>(null);
+  const [isPileHidden, setIsPileHidden] = useState(false);
 
   const previousPhaseRef = useRef<GamePhase | null>(null);
   const countdownTimeoutsRef = useRef<number[]>([]);
   const eventOverlayTimeoutRef = useRef<number | null>(null);
   const levelCompleteOverlayTimeoutRef = useRef<number | null>(null);
+  const pileClearStartTimeoutRef = useRef<number | null>(null);
   const dealIntervalRef = useRef<number | null>(null);
   const previousHandKeyRef = useRef('');
   const previousHandPhaseRef = useRef<GamePhase | null>(null);
@@ -517,7 +563,30 @@ export function App() {
   const logStickToBottomRef = useRef(true);
   const previousLogRoomCodeRef = useRef<string | null>(null);
   const prevPileCountRef = useRef(0);
-  const lastPlayedToastTimeoutRef = useRef<number | null>(null);
+  const previousResourceRef = useRef<{ lives: number | null; stars: number | null; level: number | null }>({
+    lives: null,
+    stars: null,
+    level: null,
+  });
+  const resourcePulseTimeoutsRef = useRef<{ lives?: number; stars?: number; level?: number }>({});
+  const [resourcePulse, setResourcePulse] = useState<{ lives: StatusPulse; stars: StatusPulse; level: StatusPulse }>({
+    lives: null,
+    stars: null,
+    level: null,
+  });
+  const centerPileRef = useRef<HTMLDivElement | null>(null);
+  const playerCornerRefs = useRef(new Map<string, HTMLElement>());
+  const [pileEntryMap, setPileEntryMap] = useState<Record<string, PileEntryOffset>>({});
+
+  function setPlayerCornerRef(playerIdForRef: string) {
+    return (node: HTMLElement | null) => {
+      if (node) {
+        playerCornerRefs.current.set(playerIdForRef, node);
+        return;
+      }
+      playerCornerRefs.current.delete(playerIdForRef);
+    };
+  }
 
   useEffect(() => {
     if (!room || !info) return;
@@ -666,11 +735,11 @@ export function App() {
         showEventOverlay(
           {
             title: 'Error',
-            message: '❤️ -1',
+            message: '',
             tone: 'error',
             errorData: payload,
           },
-          5000,
+          4200,
         );
       },
     );
@@ -678,27 +747,26 @@ export function App() {
     s.on('game:paused', (payload: { message?: string }) => {
       const msg = payload?.message ?? pickMessage(MSG.paused, Date.now());
       setInfo(msg);
-      showEventOverlay({ title: 'Pause', message: msg, tone: 'warn' }, 5000);
+      showEventOverlay({ title: 'Pause requested', message: msg, tone: 'warn' }, 3600);
     });
 
     s.on('game:star-used', (payload: { message?: string }) => {
       const msg = payload?.message ?? pickMessage(MSG.starUsed, Date.now());
       setInfo(msg);
-      showEventOverlay({ title: 'Star activated', message: msg, tone: 'good' }, 2600);
+      showEventOverlay({ title: 'Star resolved', message: msg, tone: 'good' }, 2600);
     });
-
     s.on('game:level-complete', (payload: { levelCompleted: number; reward: LevelReward }) => {
       pendingLevelCompleteRef.current = payload;
     });
 
     s.on('game:next-level-ready', () => {
-      setInfo('Deal ready.');
+      setInfo('New hand dealt.');
     });
 
     s.on('game:restarted', (payload: { message?: string }) => {
       const msg = payload?.message ?? 'Game restarted in the same room.';
       setInfo(msg);
-      showEventOverlay({ title: 'Retry', message: 'Game restarted in the same room.', tone: 'info' }, 5000);
+      showEventOverlay({ title: 'Game restarted', message: msg, tone: 'info' }, 3600);
     });
 
     s.on('game:over', () => {
@@ -744,11 +812,21 @@ export function App() {
     const currentPileCount = room?.game?.pileHistory?.length ?? 0;
 
     if (phase === 'level-complete' && prev !== 'level-complete' && currentPileCount > 0) {
-      setIsClearingPile(true);
+      const previousPileCount = prevPileCountRef.current;
+      const hasFreshPileEntry = currentPileCount > previousPileCount;
       const clearAnimationBaseMs = 520;
       const clearStepDelayMs = 48;
       const settleBufferMs = 120;
-      const totalClearMs = clearAnimationBaseMs + Math.max(0, currentPileCount - 1) * clearStepDelayMs + settleBufferMs;
+      const lastCardSettleMs = hasFreshPileEntry ? 340 : 0;
+      const totalClearMs =
+        lastCardSettleMs + clearAnimationBaseMs + Math.max(0, currentPileCount - 1) * clearStepDelayMs + settleBufferMs;
+
+      if (pileClearStartTimeoutRef.current) window.clearTimeout(pileClearStartTimeoutRef.current);
+      setIsPileHidden(false);
+      setIsClearingPile(false);
+      pileClearStartTimeoutRef.current = window.setTimeout(() => {
+        setIsClearingPile(true);
+      }, lastCardSettleMs);
 
       if (levelCompleteOverlayTimeoutRef.current) window.clearTimeout(levelCompleteOverlayTimeoutRef.current);
       levelCompleteOverlayTimeoutRef.current = window.setTimeout(() => {
@@ -766,17 +844,20 @@ export function App() {
           );
           pendingLevelCompleteRef.current = null;
         }
+        setIsPileHidden(true);
         setIsClearingPile(false);
       }, totalClearMs);
 
       previousGamePhaseRef.current = phase;
       return () => {
+        if (pileClearStartTimeoutRef.current) window.clearTimeout(pileClearStartTimeoutRef.current);
         if (levelCompleteOverlayTimeoutRef.current) window.clearTimeout(levelCompleteOverlayTimeoutRef.current);
       };
     }
 
     if (phase === 'focus' || phase === 'playing') {
       setIsClearingPile(false);
+      setIsPileHidden(false);
       pendingLevelCompleteRef.current = null;
     }
 
@@ -848,21 +929,126 @@ export function App() {
   const pileCards = useMemo<PileCard[]>(() => game?.pileHistory ?? [], [game?.pileHistory]);
   const playerColorMap = useMemo(() => buildPlayerColorMap(room?.players ?? []), [room?.players]);
   const playersList = useMemo(() => room?.players ?? [], [room?.players]);
+  const rivals = useMemo(
+    () =>
+      playersList
+        .filter((player) => player.id !== playerId)
+        .slice(0, RIVAL_POSITIONS.length)
+        .map((player, index) => ({
+          ...player,
+          corner: RIVAL_POSITIONS[index] ?? 'corner-top-left',
+        })),
+    [playerId, playersList],
+  );
+  const playerCornerMap = useMemo(() => {
+    const map = new Map<string, string>();
+    rivals.forEach((player) => map.set(player.id, player.corner));
+    if (playerId) map.set(playerId, SELF_POSITION);
+    return map;
+  }, [playerId, rivals]);
 
   useEffect(() => {
-    const count = pileCards.length;
-    if (count > prevPileCountRef.current && count > 0) {
-      const last = pileCards[count - 1];
-      const name = playersList.find((p) => p.id === last.playerId)?.name ?? 'Player';
-      setLastPlayedToast({ value: last.value, playerName: name, playerId: last.playerId });
-      if (lastPlayedToastTimeoutRef.current) window.clearTimeout(lastPlayedToastTimeoutRef.current);
-      lastPlayedToastTimeoutRef.current = window.setTimeout(() => setLastPlayedToast(null), 2000);
+    if (!room) {
+      setPileEntryMap({});
+      return;
     }
-    prevPileCountRef.current = count;
-    return () => {
-      if (lastPlayedToastTimeoutRef.current) window.clearTimeout(lastPlayedToastTimeoutRef.current);
+
+    let frame = 0;
+
+    const measurePileEntries = () => {
+      const centerPileEl = centerPileRef.current;
+      if (!centerPileEl) return;
+
+      const centerRect = centerPileEl.getBoundingClientRect();
+      const centerX = centerRect.left + centerRect.width / 2;
+      const centerY = centerRect.top + centerRect.height / 2;
+      const nextEntries: Record<string, PileEntryOffset> = {};
+
+      playerCornerRefs.current.forEach((node, playerIdForRef) => {
+        const cornerRect = node.getBoundingClientRect();
+        const cornerX = cornerRect.left + cornerRect.width / 2;
+        const cornerY = cornerRect.top + cornerRect.height / 2;
+        const corner = playerCornerMap.get(playerIdForRef) ?? SELF_POSITION;
+        const fallback = pileEntryOffset(corner);
+
+        nextEntries[playerIdForRef] = {
+          x: Math.round(cornerX - centerX),
+          y: Math.round(cornerY - centerY),
+          rot: fallback.rot,
+        };
+      });
+
+      setPileEntryMap((previous) => {
+        const previousKeys = Object.keys(previous);
+        const nextKeys = Object.keys(nextEntries);
+        if (
+          previousKeys.length === nextKeys.length &&
+          nextKeys.every(
+            (key) =>
+              previous[key]?.x === nextEntries[key]?.x &&
+              previous[key]?.y === nextEntries[key]?.y &&
+              previous[key]?.rot === nextEntries[key]?.rot,
+          )
+        ) {
+          return previous;
+        }
+        return nextEntries;
+      });
     };
-  }, [pileCards, playersList]);
+
+    frame = window.requestAnimationFrame(measurePileEntries);
+    window.addEventListener('resize', measurePileEntries);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener('resize', measurePileEntries);
+    };
+  }, [me?.id, playerCornerMap, playersList, room]);
+
+  useEffect(() => {
+    prevPileCountRef.current = pileCards.length;
+  }, [pileCards]);
+
+  useEffect(() => {
+    const nextLives = game?.lives ?? null;
+    const nextStars = game?.stars ?? null;
+    const nextLevel = game?.currentLevel ?? null;
+    const previous = previousResourceRef.current;
+
+    const updates: Partial<{ lives: StatusPulse; stars: StatusPulse; level: StatusPulse }> = {};
+    ([
+      ['lives', previous.lives, nextLives],
+      ['stars', previous.stars, nextStars],
+      ['level', previous.level, nextLevel],
+    ] as const).forEach(([key, prevValue, nextValue]) => {
+      if (prevValue === null || nextValue === null || prevValue === nextValue) return;
+      updates[key] = nextValue > prevValue ? 'up' : 'down';
+      const timeout = resourcePulseTimeoutsRef.current[key];
+      if (timeout) window.clearTimeout(timeout);
+      resourcePulseTimeoutsRef.current[key] = window.setTimeout(() => {
+        setResourcePulse((current) => ({ ...current, [key]: null }));
+      }, 1800);
+    });
+
+    if (Object.keys(updates).length > 0) {
+      setResourcePulse((current) => ({ ...current, ...updates }));
+    }
+
+    previousResourceRef.current = {
+      lives: nextLives,
+      stars: nextStars,
+      level: nextLevel,
+    };
+  }, [game?.currentLevel, game?.lives, game?.stars]);
+
+  useEffect(
+    () => () => {
+      Object.values(resourcePulseTimeoutsRef.current).forEach((timeout) => {
+        if (timeout) window.clearTimeout(timeout);
+      });
+    },
+    [],
+  );
 
   const isHost = room?.hostId === playerId;
   const isPlaying = game?.phase === 'playing';
@@ -878,20 +1064,111 @@ export function App() {
     room.players.every((player) => player.connected && player.ready) &&
     isHost;
   const minPlayableCard = hand.length > 0 ? Math.min(...hand) : null;
-  const showReady = !me?.ready && (((room?.status === 'lobby') && (room?.players.length ?? 0) >= 2) || canReadyForRound);
-  const showNotReady = Boolean(me?.ready) && ((room?.status === 'lobby') || canReadyForRound);
+  const showReady = !me?.ready && ((room?.status === 'lobby' && (room?.players.length ?? 0) >= 2) || canReadyForRound);
+  const showNotReady = Boolean(me?.ready) && (room?.status === 'lobby' || canReadyForRound);
   const showStart = room?.status === 'lobby' && canStart;
-  const overlayBlocking = countdown !== null || !!eventOverlay;
+  const overlayBlocking = countdown !== null;
   const showPause = isPlaying && !overlayBlocking;
   const showProposeStar = isPlaying && (game?.stars ?? 0) > 0 && !hasStarProposal && !overlayBlocking;
   const showAcceptStar = isPlaying && hasStarProposal && !alreadyAcceptedStar && !overlayBlocking;
-  const currentReward = game ? rewardLabel(game.currentLevel) : '—';
+  const showHivePlaceholder = Boolean(game && (game.phase === 'focus' || countdown !== null));
+  const showHivePlaceholderAction =
+    showHivePlaceholder && !showReady && !showNotReady && !showStart && !showPause && !showProposeStar && !showAcceptStar;
+  const currentReward = game ? rewardLabel(game.currentLevel) : 'No reward';
   const currentRewardType = game ? REWARDS[game.currentLevel] ?? null : null;
   const dealtCards = useMemo(() => hand.slice(0, dealtHandCount), [hand, dealtHandCount]);
   const orderedDealtCards = useMemo(() => [...dealtCards].sort((a, b) => a - b), [dealtCards]);
   const primaryCard = orderedDealtCards[0] ?? null;
-  const secondaryCards = orderedDealtCards.slice(1);
-  const hiddenCount = secondaryCards.length;
+  const queueCards = useMemo(() => orderedDealtCards.slice(1).sort((a, b) => a - b).slice(0, QUEUE_SLOT_COUNT), [orderedDealtCards]);
+  const ghostSlotCount = Math.max(0, QUEUE_SLOT_COUNT - queueCards.length);
+  const queueSlots = useMemo(() => [...queueCards, ...Array.from({ length: ghostSlotCount }, () => null)], [ghostSlotCount, queueCards]);
+  const queueTailCard = useMemo(() => queueSlots[5] ?? null, [queueSlots]);
+  const queueTopRow = useMemo(() => [queueSlots[4], queueSlots[3], queueSlots[2], queueSlots[1], queueSlots[0]], [queueSlots]);
+  const queueBottomRow = useMemo(() => [queueSlots[6], queueSlots[7], queueSlots[8], queueSlots[9], queueSlots[10]], [queueSlots]);
+  const baseCommandActions = [
+    showProposeStar
+      ? { key: 'star', label: 'Star', icon: 'star', className: 'command-button star', onClick: proposeStar, disabled: false }
+      : null,
+    showPause
+      ? { key: 'pause', label: 'Pause', icon: 'pause', className: 'command-button secondary', onClick: requestPause, disabled: false }
+      : null,
+    showAcceptStar
+      ? { key: 'accept-star', label: 'Accept star', icon: 'handshake', className: 'command-button pulse', onClick: acceptStar, disabled: false }
+      : null,
+    showStart
+      ? { key: 'start', label: 'Start', icon: 'play_arrow', className: 'command-button', onClick: startGame, disabled: false }
+      : null,
+    showReady
+      ? { key: 'ready', label: 'Ready', icon: 'task_alt', className: 'command-button pulse', onClick: () => setReady(true), disabled: overlayBlocking }
+      : null,
+    showNotReady
+      ? showHivePlaceholder
+        ? {
+            key: 'hive-sync',
+            label:
+              countdown === null
+                ? 'The hive is tuning the next pulse'
+                : countdown === 'play'
+                  ? 'The hive is releasing the swarm'
+                  : `The hive wakes in ${countdown}`,
+            icon: 'hive',
+            className: 'command-button secondary prep-placeholder',
+            onClick: () => {},
+            disabled: true,
+          }
+        : {
+            key: 'waiting',
+            label: 'Waiting',
+            icon: 'hourglass_top',
+            className: 'command-button secondary',
+            onClick: () => setReady(false),
+            disabled: overlayBlocking,
+          }
+      : null,
+    showHivePlaceholderAction
+      ? {
+          key: 'hive-sync',
+          label:
+            countdown === null
+              ? 'The hive is tuning the next pulse'
+              : countdown === 'play'
+                ? 'The hive is releasing the swarm'
+                : `The hive wakes in ${countdown}`,
+          icon: 'hive',
+          className: 'command-button secondary prep-placeholder',
+          onClick: () => {},
+          disabled: true,
+        }
+      : null,
+  ].filter(Boolean) as Array<{
+    key: string;
+    label: string;
+    icon: string;
+    className: string;
+    onClick: () => void;
+    disabled: boolean;
+  }>;
+
+  const commandActions =
+    baseCommandActions.length > 0
+      ? baseCommandActions
+      : room?.status === 'in-game' && game && game.phase !== 'victory' && game.phase !== 'game-over'
+        ? [
+            {
+              key: 'hive-sync',
+              label:
+                countdown === null
+                  ? 'The hive is gathering before the pulse'
+                  : countdown === 'play'
+                    ? 'The hive is releasing the swarm'
+                    : `The hive wakes in ${countdown}`,
+              icon: 'hive',
+              className: 'command-button secondary prep-placeholder layout-placeholder',
+              onClick: () => {},
+              disabled: true,
+            },
+          ]
+        : [];
 
   function saveRoomCode(roomCode: string) {
     localStorage.setItem(STORAGE_KEYS.lastRoomCode, roomCode);
@@ -903,10 +1180,9 @@ export function App() {
     setHand([]);
     setEventOverlay(null);
     setGameLog([]);
-    setLastPlayedToast(null);
+    setLogOpen(false);
     prevPileCountRef.current = 0;
   }
-
   function emitWithAck<T = any>(event: string, payload?: unknown): Promise<T> {
     return new Promise((resolve) => {
       if (!socket) {
@@ -1117,8 +1393,21 @@ export function App() {
     <main className="table-page">
       <AppBackground />
       <header className="topbar">
-        <div className="chips">
-          {room && <span className={`chip ${connectionState}`}>
+        <div className="topbar-left">
+          {room && (
+            <button
+              className="topbar-pill room-pill"
+              onClick={copyRoomLink}
+              title="Copy room link"
+              aria-label={`Copy room link for room ${room.code}`}
+            >
+            <span className="topbar-pill-label">{room.code}</span>
+              <span className="material-symbols-rounded" aria-hidden>
+                content_copy
+              </span>
+            </button>
+          )}
+          {room && <span className="topbar-pill topbar-pill-static connection-pill">
             <span className="material-symbols-rounded chip-icon" aria-hidden>
               {connectionState === 'connected'
                 ? 'wifi'
@@ -1126,199 +1415,166 @@ export function App() {
                   ? 'wifi_find'
                   : 'wifi_off'}
             </span>
-            <span>Net: {connectionLabel(connectionState)}</span>
+            <span className="topbar-pill-label">{connectionLabel(connectionState)}</span>
           </span>}
-          {room && (
-            <div className="chip room-chip" aria-label={`Room ${room.code}`}>
-              <span>Room: {room.code}</span>
-              <button className="room-copy-btn" onClick={copyRoomLink} title="Copy room link" aria-label="Copy room link">
-                <span className="material-symbols-rounded" aria-hidden>
-                  content_copy
-                </span>
-              </button>
-            </div>
-          )}
         </div>
         {room && (
-          <button className="topbar-exit" onClick={requestAbandonMatch} title="Leave room" aria-label="Leave room">
-            <span className="material-symbols-rounded" aria-hidden>logout</span>
-          </button>
+          <div className="topbar-right">
+            <button
+              className={`topbar-pill${logOpen ? ' active' : ''}`}
+              onClick={() => setLogOpen((current) => !current)}
+              aria-expanded={logOpen}
+              aria-controls="game-log-drawer"
+              title="Toggle game log"
+            >
+              <span className="material-symbols-rounded" aria-hidden>notes</span>
+              Log
+            </button>
+            <button className="topbar-pill topbar-exit-pill" onClick={requestAbandonMatch} title="Leave room" aria-label="Leave room">
+              <span className="material-symbols-rounded" aria-hidden>logout</span>
+              Exit
+            </button>
+          </div>
         )}
       </header>
 
       {!room && (
         <div className="lobby-scroll">
-        <HeroSection />
-        <section className="panel lobby-panel">
-          <div className="tabs-row" role="tablist" aria-label="Room access">
-            <button
-              role="tab"
-              aria-selected={accessTab === 'join'}
-              className={`tab-btn ${accessTab === 'join' ? 'active' : ''}`}
-              onClick={() => setAccessTab('join')}
-            >
-              Join room
-            </button>
-            <button
-              role="tab"
-              aria-selected={accessTab === 'create'}
-              className={`tab-btn ${accessTab === 'create' ? 'active' : ''}`}
-              onClick={() => setAccessTab('create')}
-            >
-              Create room
-            </button>
-          </div>
-
-          {accessTab === 'create' && (
-            <div className="lobby-grid">
-              <label>
-                Name
-                <input
-                  value={playerName}
-                  onChange={(e) => setPlayerName(e.target.value)}
-                  placeholder="Your name"
-                />
-              </label>
-
-              <div className="actions align-right">
-                <button onClick={createRoom} disabled={accessBusy}>Create room</button>
-              </div>
+          <HeroSection />
+          <section className="panel lobby-panel">
+            <div className="tabs-row" role="tablist" aria-label="Room access">
+              <button
+                role="tab"
+                aria-selected={accessTab === 'join'}
+                className={`tab-btn ${accessTab === 'join' ? 'active' : ''}`}
+                onClick={() => setAccessTab('join')}
+              >
+                Join room
+              </button>
+              <button
+                role="tab"
+                aria-selected={accessTab === 'create'}
+                className={`tab-btn ${accessTab === 'create' ? 'active' : ''}`}
+                onClick={() => setAccessTab('create')}
+              >
+                Create room
+              </button>
             </div>
-          )}
 
-          {accessTab === 'join' && (
-            <div className="lobby-grid">
-              <label>
-                Name
-                <input
-                  value={playerName}
-                  onChange={(e) => setPlayerName(e.target.value)}
-                  placeholder="Your name"
-                />
-              </label>
+            {accessTab === 'create' && (
+              <div className="lobby-grid">
+                <label>
+                  Name
+                  <input
+                    value={playerName}
+                    onChange={(e) => setPlayerName(e.target.value)}
+                    placeholder="Your name"
+                  />
+                </label>
 
-              <label>
-                Room code
-                <input
-                  value={roomCodeInput}
-                  onChange={(e) => setRoomCodeInput(e.target.value.toUpperCase())}
-                  placeholder="ABC123"
-                />
-              </label>
-
-              <div className="actions align-right">
-                <button onClick={joinRoom} disabled={accessBusy}>Join</button>
+                <div className="actions align-right">
+                  <button onClick={createRoom} disabled={accessBusy}>Create room</button>
+                </div>
               </div>
-            </div>
-          )}
-        </section>
-        <RulesPanels />
+            )}
+
+            {accessTab === 'join' && (
+              <div className="lobby-grid">
+                <label>
+                  Name
+                  <input
+                    value={playerName}
+                    onChange={(e) => setPlayerName(e.target.value)}
+                    placeholder="Your name"
+                  />
+                </label>
+
+                <label>
+                  Room code
+                  <input
+                    value={roomCodeInput}
+                    onChange={(e) => setRoomCodeInput(e.target.value.toUpperCase())}
+                    placeholder="ABC123"
+                  />
+                </label>
+
+                <div className="actions align-right">
+                  <button onClick={joinRoom} disabled={accessBusy}>Join</button>
+                </div>
+              </div>
+            )}
+          </section>
+          <RulesPanels />
         </div>
       )}
 
       {room && (
         <section className="game-layout">
-          <section className={`table-wrap panel${room?.status === 'in-game' ? ' in-game' : ''}`}>
-            <aside className="players-overlay" aria-label="Player status">
-              <ul className="players-list">
-                {playersList.map((player) => {
-                  const cardsRemaining = cardsRemainingForPlayer(player);
-                  const isPlayerPlaying = game?.phase === 'playing' && player.connected;
-
-                  return (
-                    <li key={player.id} className={`players-item ${isPlayerPlaying ? 'is-playing' : ''}`}>
-                      <div className="players-main-row">
-                        <span className="players-main-left">
-                          <span className="players-status" title={`${player.name}: estado`}>
-                            <span className="material-symbols-rounded" aria-hidden>
-                              {statusIconForSeat(player, game?.phase)}
-                            </span>
-                          </span>
-                          <strong className="players-name" style={{ color: playerColorMap.get(player.id) }}>
-                            {player.name}
-                          </strong>
-                          {player.id === room.hostId && (
-                            <span className="owner-badge material-symbols-rounded" aria-label="Host">
-                              crown
-                            </span>
-                          )}
-                        </span>
-
-                        <div className="player-backs" aria-hidden>
-                          {Array.from({ length: cardsRemaining }).map((_, i) => (
-                            <span key={`${player.id}-back-${i}`} className="player-back" style={{ '--i': i } as any} />
-                          ))}
-                        </div>
-                        <span className="player-count-badge" aria-hidden>×{cardsRemaining}</span>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </aside>
-
-            <div className={`table-felt${isPlaying ? ' is-playing' : ''}`}>
-              <div className="table-resources-overlay" aria-label="Team resources">
-                <span className="status-item">
-                  <strong>
-                    <span className="material-symbols-rounded inline-icon" aria-hidden>
-                      favorite
+          <section className="game-shell">
+            <section className={`felt-stage${isPlaying ? ' is-playing' : ''}`}>
+              {rivals.map((player) => {
+                const cardsRemaining = cardsRemainingForPlayer(player);
+                return (
+                  <article
+                    key={player.id}
+                    className={`player-corner ${player.corner}`}
+                    ref={setPlayerCornerRef(player.id)}
+                    style={{ borderColor: playerColorMap.get(player.id) ?? undefined } as any}
+                  >
+                    <span
+                      className="material-symbols-rounded player-corner-status-icon"
+                      aria-label={statusLabelForSeat(player, game?.phase)}
+                      title={statusLabelForSeat(player, game?.phase)}
+                    >
+                        {statusIconForSeat(player, game?.phase)}
                     </span>
-                    Lives:
-                  </strong>{' '}
-                  {game?.lives ?? '—'}
-                </span>
-                <span className="status-item">
-                  <strong>
-                    <span className="material-symbols-rounded inline-icon" aria-hidden>
-                      star
-                    </span>
-                    Stars:
-                  </strong>{' '}
-                  {game?.stars ?? '—'}
-                </span>
-                <span className="status-item">
-                  <strong>
-                    <span className="material-symbols-rounded inline-icon" aria-hidden>
-                      floor
-                    </span>
-                    Level:
-                  </strong>{' '}
-                  {game ? `${game.currentLevel}/${game.maxLevel}` : '—'}
-                </span>
-              </div>
-
-              <div className="table-progress-overlay" aria-label="Round reward">
-                <span className="status-item status-reward">
-                  <strong>
-                    <span className="material-symbols-rounded inline-icon reward-label-icon" aria-hidden>
-                      workspace_premium
-                    </span>
-                    Reward:
+                    {player.id === room.hostId && (
+                      <span className="material-symbols-rounded player-corner-host" aria-label="Host">crown</span>
+                    )}
+                    <strong className="player-corner-name" style={{ color: playerColorMap.get(player.id) }}>
+                      {player.name}
+                    </strong>
+                    <span className="player-corner-count">x{cardsRemaining}</span>
+                  </article>
+                );
+              })}
+              {me && (
+                <article
+                  className={`player-corner own-player-corner ${SELF_POSITION}`}
+                  ref={setPlayerCornerRef(me.id)}
+                  style={{ borderColor: playerColorMap.get(me.id) ?? undefined } as any}
+                >
+                  <span
+                    className="material-symbols-rounded player-corner-status-icon"
+                    aria-label={statusLabelForSeat(me, game?.phase)}
+                    title={statusLabelForSeat(me, game?.phase)}
+                  >
+                    {statusIconForSeat(me, game?.phase)}
+                  </span>
+                  {me.id === room.hostId && (
+                    <span className="material-symbols-rounded player-corner-host" aria-label="Host">crown</span>
+                  )}
+                  <strong className="player-corner-name" style={{ color: playerColorMap.get(me.id) }}>
+                    {me.name}
                   </strong>
-                  {currentRewardType === 'life' && (
-                    <span className="material-symbols-rounded inline-icon reward-type-icon reward-life-icon" aria-hidden title="Life">
-                      favorite
-                    </span>
-                  )}
-                  {currentRewardType === 'star' && (
-                    <span className="material-symbols-rounded inline-icon reward-type-icon reward-star-icon" aria-hidden title="Star">
-                      star
-                    </span>
-                  )}
-                  {!currentRewardType && ` ${currentReward}`}
-                </span>
-              </div>
+                  <span className="player-corner-count">x{cardsRemainingForPlayer(me)}</span>
+                </article>
+              )}
 
-              <div className={`center-pile ${isClearingPile ? 'clearing' : ''}`} aria-label="center pile">
-                {pileCards.length === 0 && <div className="pile-empty">Play the first card</div>}
+              <div className={`center-pile ${isClearingPile ? ' clearing' : ''}`} aria-label="Center pile" ref={centerPileRef}>
+                {!isPileHidden && pileCards.length === 0 && <div className="pile-empty">Play the first card</div>}
 
-                {pileCards.map((card, index) => (
+                {!isPileHidden &&
+                  pileCards.map((card, index) => (
                   <article
                     key={`${card.value}-${index}`}
                     className="card face pile"
                     style={{
-                      ...pileStyle(index, card.value),
+                      ...pileStyle(
+                        index,
+                        card.value,
+                        pileEntryMap[card.playerId] ?? pileEntryOffset(playerCornerMap.get(card.playerId) ?? SELF_POSITION),
+                      ),
                       '--clear-delay': `${index * 48}ms`,
                       borderColor: playerColorMap.get(card.playerId) ?? undefined,
                     } as any}
@@ -1327,74 +1583,68 @@ export function App() {
                     <span className="center">{card.value}</span>
                     <span className="corner br">{card.value}</span>
                   </article>
-                ))}
-              </div>
+                  ))}
 
-              {lastPlayedToast && !countdown && !eventOverlay && (
-                <div className="last-played-toast" aria-live="polite">
-                  <span style={{ color: playerColorMap.get(lastPlayedToast.playerId) }}>
-                    {lastPlayedToast.playerName}
-                  </span>
-                  {' played '}
-                  <strong style={{ color: playerColorMap.get(lastPlayedToast.playerId) }}>
-                    {lastPlayedToast.value}
-                  </strong>
-                </div>
-              )}
+                {currentRewardType && (
+                  <div className="felt-reward" aria-label="Round reward">
+                    <span className="felt-reward-label">Reward</span>
+                    <span className="material-symbols-rounded felt-reward-icon" aria-hidden>
+                      {rewardTypeIcon(currentRewardType)}
+                    </span>
+                  </div>
+                )}
+
+              </div>
 
               {countdown && (
                 <div className="countdown-overlay">
                   <div className={`count-number ${countdown === 'play' ? 'play' : ''}`}>
-                    {countdown === 'play' ? 'PLAY!' : countdown}
+                    {countdown === 'play' ? 'PLAY' : countdown}
                   </div>
                 </div>
               )}
 
               {eventOverlay && game?.phase !== 'victory' && game?.phase !== 'game-over' && (
-                <div className="event-overlay-backdrop">
-                  <div className={`event-overlay-card ${eventOverlay.tone}`}>
-                    <h2>{eventOverlay.title}</h2>
-                    <p>{eventOverlay.message}</p>
+                <div className={`countdown-overlay event-message-overlay ${eventOverlay.tone}`} aria-live="polite">
+                  <div className="event-message-stack">
+                    <h2 className={`event-message-headline ${eventOverlay.tone}`}>{eventOverlay.title}</h2>
+
                     {eventOverlay.tone === 'error' && eventOverlay.errorData && (
-                      <p className="error-compact-line">
-                        <span
-                          className="error-number"
-                          style={{ color: playerColorMap.get(eventOverlay.errorData.playedCard.playerId) }}
-                        >
-                          {eventOverlay.errorData.playedCard.value}
-                        </span>{' '}
-                        {'>'}{' '}
-                        {(eventOverlay.errorData.blockingCards ?? []).map((card, idx) => (
-                          <span key={`${card.playerId}-${card.value}-${idx}`}>
-                            <span className="error-number" style={{ color: playerColorMap.get(card.playerId) }}>
-                              {card.value}
+                      <>
+                        <p className="error-compact-line">
+                          <span
+                            className="error-number"
+                            style={{ color: playerColorMap.get(eventOverlay.errorData.playedCard.playerId) }}
+                          >
+                            {eventOverlay.errorData.playedCard.value}
+                          </span>
+                          {' > '}
+                          {(eventOverlay.errorData.blockingCards ?? []).map((card, idx) => (
+                            <span key={`${card.playerId}-${card.value}-${idx}`}>
+                              <span className="error-number" style={{ color: playerColorMap.get(card.playerId) }}>
+                                {card.value}
+                              </span>
+                              {idx < ((eventOverlay.errorData?.blockingCards.length ?? 0) - 1) ? ', ' : ''}
                             </span>
-                            {idx < ((eventOverlay.errorData?.blockingCards.length ?? 0) - 1) ? ', ' : ''}
-                          </span>
-                        ))}
-                      </p>
+                          ))}
+                        </p>
+                        <p className="error-life-loss">-1 ❤</p>
+                      </>
                     )}
-                    {eventOverlay.detail && <small>{eventOverlay.detail}</small>}
+
+                    {eventOverlay.message && <p className="event-message-copy">{eventOverlay.message}</p>}
+                    {eventOverlay.detail && <small className="event-message-detail">{eventOverlay.detail}</small>}
+
                     {eventOverlay.reward && (
-                      <div className="reward-big">
-                        {eventOverlay.reward === 'life' ? (
-                          <span title="+1 vida">
-                            <span className="material-symbols-rounded inline-icon" aria-hidden>
-                              favorite
-                            </span>{' '}
-                            +1
-                          </span>
-                        ) : (
-                          <span title="+1 estrella">
-                            <span className="material-symbols-rounded inline-icon" aria-hidden>
-                              star
-                            </span>{' '}
-                            +1
-                          </span>
-                        )}
+                      <div className={`event-message-reward ${eventOverlay.reward}`}>
+                        <span className="event-message-reward-value">
+                          <span className="material-symbols-rounded" aria-hidden>{rewardTypeIcon(eventOverlay.reward)}</span>
+                          {rewardTypeLabel(eventOverlay.reward)}
+                        </span>
                       </div>
                     )}
-                    <div className="overlay-progress-track" aria-hidden>
+
+                    <div className="overlay-progress-track event-message-progress" aria-hidden>
                       <div
                         className="overlay-progress-fill"
                         style={{ '--overlay-ms': `${eventOverlay.durationMs ?? 5000}ms` } as any}
@@ -1408,7 +1658,7 @@ export function App() {
                 <div className="modal-backdrop">
                   <div className="modal-card exit-modal">
                     <h3>Leave room</h3>
-                    <p>Are you sure you want to leave? You'll lose the current game in this room.</p>
+                    <p>Are you sure you want to leave? You will lose the current game in this room.</p>
                     <div className="actions centered">
                       <button className="btn-secondary" onClick={cancelAbandonMatch}>
                         Cancel
@@ -1428,15 +1678,15 @@ export function App() {
                       <span key={`c-${i}`} className="confetti" style={{ '--i': i } as any} />
                     ))}
                   </div>
-                  <h2>YOU WON!</h2>
+                  <h2>You won</h2>
                   <p>{pickMessage(MSG.victory, game.currentLevel + game.pile.length)}</p>
                   <div className="actions centered">
                     {isHost ? (
                       <button onClick={retryMatch}>Retry</button>
                     ) : (
-                      <span className="muted">Waiting for host to retry…</span>
+                      <span className="muted">Waiting for the host to retry.</span>
                     )}
-                    <button onClick={requestAbandonMatch}>Abandon</button>
+                    <button onClick={requestAbandonMatch}>Leave room</button>
                   </div>
                 </div>
               )}
@@ -1449,52 +1699,106 @@ export function App() {
                     </span>{' '}
                     You lost
                   </h2>
+                  <p>{pickMessage(MSG.defeat, game.currentLevel + game.pile.length)}</p>
                   <div className="actions centered">
                     {isHost ? (
                       <button onClick={retryMatch}>Retry</button>
                     ) : (
-                      <span className="muted">Waiting for host to retry…</span>
+                      <span className="muted">Waiting for the host to retry.</span>
                     )}
-                    <button onClick={requestAbandonMatch}>Abandon</button>
+                    <button onClick={requestAbandonMatch}>Leave room</button>
                   </div>
                 </div>
               )}
-            </div>
-
-            <section className="game-log-row panel" aria-label="Game log">
-              <header className="game-log-header">
-                <strong>Game log</strong>
-              </header>
-
-              <div className="game-log-list" ref={logScrollRef} onScroll={onLogScroll}>
-                {gameLog.length === 0 && <p className="log-empty">No events yet.</p>}
-                {[...gameLog].reverse().map((entry) => (
-                  <article key={entry.id} className="log-item log-item-enter">
-                    <span className="material-symbols-rounded log-icon" aria-hidden>
-                      {logIcon(entry.type)}
-                    </span>
-                    <p className="log-message">
-                      {logSegments(entry).map((segment, index) => (
-                        <span
-                          key={`${entry.id}-seg-${index}`}
-                          style={{ color: segment.playerId ? playerColorMap.get(segment.playerId) : undefined }}
-                        >
-                          {segment.text}
-                        </span>
-                      ))}
-                    </p>
-                  </article>
-                ))}
-              </div>
             </section>
 
-            <div className="my-hand panel">
-              <div className="hand-layout">
-                {!orderedDealtCards.length && <p className="muted">No cards in hand</p>}
+            <section className="command-deck panel">
+              <div className="command-top-row">
+                <div className="command-status-group" aria-label="Player resources">
+                  <span className={`status-item compact-status${resourcePulse.lives ? ` is-${resourcePulse.lives}` : ''}`}>
+                    <strong>
+                      <span className="material-symbols-rounded inline-icon" aria-hidden>
+                        favorite
+                      </span>
+                      Lives
+                    </strong>
+                    {game?.lives ?? '-'}
+                  </span>
+                  <span className={`status-item compact-status${resourcePulse.stars ? ` is-${resourcePulse.stars}` : ''}`}>
+                    <strong>
+                      <span className="material-symbols-rounded inline-icon" aria-hidden>
+                        star
+                      </span>
+                      Stars
+                    </strong>
+                    {game?.stars ?? '-'}
+                  </span>
+                  <span className={`status-item compact-status${resourcePulse.level ? ` is-${resourcePulse.level}` : ''}`}>
+                    <strong>
+                      <span className="material-symbols-rounded inline-icon" aria-hidden>
+                        floor
+                      </span>
+                      Level
+                    </strong>
+                    {game ? `${game.currentLevel}/${game.maxLevel}` : '-'}
+                  </span>
+                </div>
+              </div>
 
-                {primaryCard !== null && (
+              <div className="command-action-row">
+                {commandActions.map((action) => (
                   <button
-                    className={`card face hand-card${isPlaying && !overlayBlocking && primaryCard === minPlayableCard ? ' playable' : ''}`}
+                    key={action.key}
+                    className={`${action.className}${action.key === 'ready' || action.key === 'waiting' || action.key === 'hive-sync' ? ' full-span' : ''}`}
+                    onClick={action.onClick}
+                    disabled={action.disabled}
+                  >
+                    <span className="material-symbols-rounded" aria-hidden>{action.icon}</span>
+                    {action.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="command-hand-row">
+                <div className={`command-queue${primaryCard === null ? ' is-empty' : ''}`} aria-label="Upcoming cards">
+                  <div
+                    className={`card face queue-card queue-tail${queueTailCard !== null ? ' filled' : ' ghost'}`}
+                    aria-hidden={queueTailCard === null}
+                    style={queueTailCard !== null ? ({ borderColor: playerColorMap.get(playerId) ?? undefined } as any) : undefined}
+                  >
+                    {queueTailCard !== null ? <span className="center">{queueTailCard}</span> : <span className="queue-slot-ghost-dot" />}
+                  </div>
+                  <div className="queue-grid">
+                    <div className="queue-row queue-row-top">
+                      {queueTopRow.map((card, index) => (
+                        <div
+                          key={`queue-top-${index}`}
+                          className={`card face queue-card${card !== null ? ' filled' : ' ghost'}`}
+                          aria-hidden={card === null}
+                          style={card !== null ? ({ borderColor: playerColorMap.get(playerId) ?? undefined } as any) : undefined}
+                        >
+                          {card !== null ? <span className="center">{card}</span> : <span className="queue-slot-ghost-dot" />}
+                        </div>
+                      ))}
+                    </div>
+                    <div className="queue-row queue-row-bottom">
+                      {queueBottomRow.map((card, index) => (
+                        <div
+                          key={`queue-bottom-${index}`}
+                          className={`card face queue-card${card !== null ? ' filled' : ' ghost'}`}
+                          aria-hidden={card === null}
+                          style={card !== null ? ({ borderColor: playerColorMap.get(playerId) ?? undefined } as any) : undefined}
+                        >
+                          {card !== null ? <span className="center">{card}</span> : <span className="queue-slot-ghost-dot" />}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {primaryCard !== null ? (
+                  <button
+                    className={`card face primary-card${isPlaying && primaryCard === minPlayableCard && !overlayBlocking ? ' playable' : ''}`}
                     onClick={() => playCard(primaryCard)}
                     disabled={!isPlaying || overlayBlocking || primaryCard !== minPlayableCard}
                     title="Play this card"
@@ -1504,79 +1808,44 @@ export function App() {
                     <span className="center">{primaryCard}</span>
                     <span className="corner br">{primaryCard}</span>
                   </button>
-                )}
-
-                {!showAllCards && hiddenCount > 0 && (
-                  <button
-                    className="card face hand-card hand-more-toggle"
-                    onClick={() => setShowAllCards(true)}
-                    title="Show other cards"
-                  >
-                    <span className="center">+{hiddenCount}</span>
-                  </button>
-                )}
-
-                {showAllCards && secondaryCards.map((card, i) => (
-                  <button
-                    key={`secondary-${card}`}
-                    className={`card face hand-card${isPlaying && !overlayBlocking && card === minPlayableCard ? ' playable' : ''}`}
-                    onClick={() => { playCard(card); setShowAllCards(false); }}
-                    disabled={!isPlaying || overlayBlocking || card !== minPlayableCard}
-                    title="Waiting card"
-                    style={{ borderColor: playerColorMap.get(playerId) ?? undefined, '--i': i } as any}
-                  >
-                    <span className="corner tl">{card}</span>
-                    <span className="center">{card}</span>
-                    <span className="corner br">{card}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {(showReady || showNotReady || showStart || showPause || showProposeStar || showAcceptStar) && (
-              <div className="mobile-cta-bar">
-                {showReady && (
-                  <button className="mobile-cta-btn pulse" onClick={() => setReady(true)} disabled={overlayBlocking}>
-                    <span className="material-symbols-rounded" aria-hidden>task_alt</span>
-                    Ready
-                  </button>
-                )}
-                {showNotReady && (
-                  <button className="mobile-cta-btn secondary" onClick={() => setReady(false)} disabled={overlayBlocking}>
-                    <span className="material-symbols-rounded" aria-hidden>hourglass_top</span>
-                    Waiting…
-                  </button>
-                )}
-                {showStart && (
-                  <button className="mobile-cta-btn" onClick={startGame} disabled={overlayBlocking}>
-                    <span className="material-symbols-rounded" aria-hidden>play_arrow</span>
-                    Start
-                  </button>
-                )}
-                {showPause && (
-                  <button className="mobile-cta-btn secondary" onClick={requestPause}>
-                    <span className="material-symbols-rounded" aria-hidden>pause</span>
-                    Pause
-                  </button>
-                )}
-                {showProposeStar && (
-                  <button className="mobile-cta-btn star" onClick={proposeStar}>
-                    <span className="material-symbols-rounded" aria-hidden>star</span>
-                    Star
-                  </button>
-                )}
-                {showAcceptStar && (
-                  <button className="mobile-cta-btn pulse" onClick={acceptStar}>
-                    <span className="material-symbols-rounded" aria-hidden>handshake</span>
-                    Accept Star
-                  </button>
+                ) : (
+                  <div className="primary-card-empty">No card</div>
                 )}
               </div>
-            )}
+            </section>
           </section>
+
+          <aside id="game-log-drawer" className={`log-drawer panel${logOpen ? ' open' : ''}`} aria-label="Game log">
+            <header className="log-drawer-header">
+              <strong>Game log</strong>
+              <button className="log-drawer-close" onClick={() => setLogOpen(false)} aria-label="Close game log">
+                <span className="material-symbols-rounded" aria-hidden>close</span>
+              </button>
+            </header>
+
+            <div className="game-log-list" ref={logScrollRef} onScroll={onLogScroll}>
+              {gameLog.length === 0 && <p className="log-empty">No events yet.</p>}
+              {[...gameLog].reverse().map((entry) => (
+                <article key={entry.id} className="log-item log-item-enter">
+                  <span className="material-symbols-rounded log-icon" aria-hidden>
+                    {logIcon(entry.type)}
+                  </span>
+                  <p className="log-message">
+                    {logSegments(entry).map((segment, index) => (
+                      <span
+                        key={`${entry.id}-seg-${index}`}
+                        style={{ color: segment.playerId ? playerColorMap.get(segment.playerId) : undefined }}
+                      >
+                        {segment.text}
+                      </span>
+                    ))}
+                  </p>
+                </article>
+              ))}
+            </div>
+          </aside>
         </section>
       )}
-
     </main>
   );
 }
