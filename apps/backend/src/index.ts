@@ -40,6 +40,8 @@ type GameState = {
 
 type Room = {
   code: string;
+  displayCode?: string;
+  shareable?: boolean;
   hostId: string;
   players: Record<string, Player>;
   status: 'lobby' | 'in-game';
@@ -74,10 +76,8 @@ const GAME_BALANCE: Record<number, { maxLevel: number; lives: number }> = {
 const PORT = Number(process.env.PORT ?? 3001);
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN ?? 'http://localhost:5173';
 const ALLOW_ALL_ORIGINS = CLIENT_ORIGIN.trim() === '*';
-const DEV_ROOM_ENABLED = process.env.DEV_ROOM_ENABLED === 'true';
-const DEV_ROOM_CODE = (process.env.DEV_ROOM_CODE ?? 'DEVCPU').trim().toUpperCase() || 'DEVCPU';
-const DEV_CPU_PLAYERS = clampNumber(Number(process.env.DEV_CPU_PLAYERS ?? 3), 1, MAX_PLAYERS - 1);
 const DEV_CPU_PLAY_DELAY_MS = clampNumber(Number(process.env.DEV_CPU_PLAY_DELAY_MS ?? 900), 100, 10_000);
+const STAR_RESOLVED_CPU_DELAY_MS = 3000;
 const ROUND_COUNTDOWN_DELAY_MS = 3600;
 const ROUND_OUT_FLIP_MS = 520;
 const ROUND_OUT_UNFLIP_MS = 520;
@@ -153,6 +153,8 @@ function serializeRoom(room: Room) {
 
   return {
     code: room.code,
+    displayCode: room.displayCode ?? room.code,
+    shareable: room.shareable ?? true,
     hostId: room.hostId,
     status: room.status,
     players,
@@ -502,6 +504,7 @@ function playCardInRoom(room: Room, roomCode: string, player: Player, card: numb
     .sort((a, b) => a.value - b.value);
 
   const hasLowerCardInAnyHand = blockingCards.length > 0;
+  if (hasLowerCardInAnyHand) clearCpuTurn(roomCode);
 
   room.game.pile.push(card);
   room.game.pileHistory.push({ value: card, playerId: player.id });
@@ -623,7 +626,7 @@ function resolveStarIfEveryoneAccepted(room: Room, roomCode: string): boolean {
     byPlayerId: initiatorId,
     revealed: revealedPreview,
   });
-  scheduleCpuTurn(roomCode);
+  scheduleCpuTurn(roomCode, STAR_RESOLVED_CPU_DELAY_MS);
   return true;
 }
 
@@ -771,6 +774,44 @@ function isValidPlayerId(playerId: string): boolean {
   return /^[a-zA-Z0-9_-]{8,64}$/.test(playerId);
 }
 
+function parseCpuRoomCode(roomCode: string): number | null {
+  const match = /^CPUON([1-7])$/.exec(roomCode);
+  if (!match) return null;
+  return clampNumber(Number(match[1]), 1, MAX_PLAYERS - 1);
+}
+
+function createCpuRoom(roomCode: string, cpuPlayers: number, displayCode = roomCode): Room {
+  const players: Record<string, Player> = {};
+  for (let index = 1; index <= cpuPlayers; index += 1) {
+    const id = `${roomCode.toLowerCase()}-cpu-${String(index).padStart(2, '0')}`;
+    players[id] = {
+      id,
+      name: `CPU ${index}`,
+      socketId: null,
+      connected: true,
+      ready: true,
+      hand: [],
+      isCpu: true,
+    };
+  }
+
+  const hostId = Object.keys(players)[0];
+  const room: Room = {
+    code: roomCode,
+    displayCode,
+    shareable: false,
+    hostId,
+    status: 'lobby',
+    players,
+    game: null,
+    logs: [],
+  };
+
+  rooms.set(roomCode, room);
+  app.log.info({ roomCode, cpuPlayers }, 'CPU room ready');
+  return room;
+}
+
 function resetDevCpuRoomToLobby(room: Room, roomCode: string) {
   if (!isDevCpuRoom(room) || getHumanPlayers(room).length > 0) return;
 
@@ -788,38 +829,6 @@ function resetDevCpuRoomToLobby(room: Room, roomCode: string) {
   const cpuHost = Object.values(room.players).find((player) => player.isCpu);
   if (cpuHost) room.hostId = cpuHost.id;
 }
-
-function initializeDevCpuRoom() {
-  if (!DEV_ROOM_ENABLED || rooms.has(DEV_ROOM_CODE)) return;
-
-  const players: Record<string, Player> = {};
-  for (let index = 1; index <= DEV_CPU_PLAYERS; index += 1) {
-    const id = `dev-cpu-${String(index).padStart(2, '0')}`;
-    players[id] = {
-      id,
-      name: `CPU ${index}`,
-      socketId: null,
-      connected: true,
-      ready: true,
-      hand: [],
-      isCpu: true,
-    };
-  }
-
-  const hostId = Object.keys(players)[0];
-  rooms.set(DEV_ROOM_CODE, {
-    code: DEV_ROOM_CODE,
-    hostId,
-    status: 'lobby',
-    players,
-    game: null,
-    logs: [],
-  });
-
-  app.log.info({ roomCode: DEV_ROOM_CODE, cpuPlayers: DEV_CPU_PLAYERS }, 'Dev CPU room ready');
-}
-
-initializeDevCpuRoom();
 
 io.on('connection', (socket) => {
   socket.on('room:leave', (ack?: (response: unknown) => void) => {
@@ -887,18 +896,28 @@ io.on('connection', (socket) => {
       payload: { roomCode: string; playerName: string; playerId: string },
       ack?: (response: unknown) => void,
     ) => {
-      const roomCode = payload?.roomCode?.trim().toUpperCase();
+      const requestedRoomCode = payload?.roomCode?.trim().toUpperCase();
       const playerName = payload?.playerName?.trim();
       const playerId = payload?.playerId?.trim();
 
-      if (!roomCode || !playerName || !playerId || !isValidPlayerId(playerId)) {
+      if (!requestedRoomCode || !playerName || !playerId || !isValidPlayerId(playerId)) {
         ack?.({ ok: false, error: 'Código, nombre o identificador inválido' });
         return;
       }
 
-      const room = rooms.get(roomCode);
+      let roomCode = requestedRoomCode;
+      let room = rooms.get(roomCode);
       if (!room) {
-        ack?.({ ok: false, error: 'La sala no existe' });
+        const cpuPlayers = parseCpuRoomCode(requestedRoomCode);
+        if (!cpuPlayers) {
+          ack?.({ ok: false, error: 'La sala no existe' });
+          return;
+        }
+
+        roomCode = createUniqueRoomCode();
+        room = createCpuRoom(roomCode, cpuPlayers, requestedRoomCode);
+      } else if (room.shareable === false && !room.players[playerId]) {
+        ack?.({ ok: false, error: 'Esta sala privada no se puede compartir' });
         return;
       }
 

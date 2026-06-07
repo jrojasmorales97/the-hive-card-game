@@ -15,6 +15,8 @@ type GamePhase = 'focus' | 'playing' | 'paused' | 'round-complete' | 'level-comp
 
 type RoomState = {
   code: string;
+  displayCode?: string;
+  shareable?: boolean;
   hostId: string;
   status: 'lobby' | 'in-game';
   players: Player[];
@@ -108,7 +110,6 @@ const STORAGE_KEYS = {
 };
 
 const PLAYER_PALETTE = ['#2EEBFF', '#FF2FAE', '#FFCC00', '#FFFFFF', '#9DFF8A', '#FF8A3D', '#B88CFF', '#7CFFCB'] as const;
-const QUEUE_SLOT_COUNT = 11;
 const RIVAL_POSITIONS = [
   'corner-top-left',
   'corner-top-right',
@@ -677,14 +678,14 @@ export function App() {
     if (typeof window === 'undefined') return;
     const url = new URL(window.location.href);
 
-    if (room?.code) {
+    if (room?.code && room.shareable !== false) {
       url.searchParams.set('room', room.code);
     } else {
       url.searchParams.delete('room');
     }
 
     window.history.replaceState({}, '', url.toString());
-  }, [room?.code]);
+  }, [room?.code, room?.shareable]);
 
   useEffect(() => {
     if (!playerName) return;
@@ -1109,18 +1110,36 @@ export function App() {
   const dealtCards = useMemo(() => hand.slice(0, dealtHandCount), [hand, dealtHandCount]);
   const orderedDealtCards = useMemo(() => [...dealtCards].sort((a, b) => a - b), [dealtCards]);
   const primaryCard = orderedDealtCards[0] ?? null;
-  const queueCards = useMemo(() => orderedDealtCards.slice(1).sort((a, b) => a - b).slice(0, QUEUE_SLOT_COUNT), [orderedDealtCards]);
-  const ghostSlotCount = Math.max(0, QUEUE_SLOT_COUNT - queueCards.length);
+  const maxQueueSlotCount = Math.max(0, (game?.maxLevel ?? 1) - 1);
+  const queueCards = useMemo(
+    () => orderedDealtCards.slice(1).sort((a, b) => a - b).slice(0, maxQueueSlotCount),
+    [maxQueueSlotCount, orderedDealtCards],
+  );
+  const ghostSlotCount = Math.max(0, maxQueueSlotCount - queueCards.length);
   const queueSlots = useMemo(() => [...queueCards, ...Array.from({ length: ghostSlotCount }, () => null)], [ghostSlotCount, queueCards]);
-  const queueTailCard = useMemo(() => queueSlots[5] ?? null, [queueSlots]);
-  const queueTopRow = useMemo(() => [queueSlots[4], queueSlots[3], queueSlots[2], queueSlots[1], queueSlots[0]], [queueSlots]);
-  const queueBottomRow = useMemo(() => [queueSlots[6], queueSlots[7], queueSlots[8], queueSlots[9], queueSlots[10]], [queueSlots]);
+  const queueTopRow = useMemo(() => queueSlots.slice(0, 5), [queueSlots]);
+  const queueCurveSlot = queueSlots.length > 5 ? queueSlots[5] : null;
+  const showQueueCurveSlot = queueSlots.length > 5;
+  const queueBottomRow = useMemo(() => queueSlots.slice(6), [queueSlots]);
+  const queueCardStyle = (index: number, card: number | null) => {
+    return {
+      ...(card !== null ? { borderColor: playerColorMap.get(playerId) ?? undefined } : {}),
+      '--queue-deal-delay': `${index * 34}ms`,
+    } as any;
+  };
   const baseCommandActions = [
     showProposeStar
       ? { key: 'star', label: 'Star', icon: 'star', className: 'command-button star', onClick: proposeStar, disabled: false }
       : null,
     showPause
-      ? { key: 'pause', label: 'Pause', icon: 'pause', className: 'command-button secondary', onClick: requestPause, disabled: false }
+      ? {
+          key: 'pause',
+          label: 'Pause',
+          icon: 'pause',
+          className: `command-button secondary${(game?.stars ?? 0) <= 0 ? ' full-span' : ''}`,
+          onClick: requestPause,
+          disabled: false,
+        }
       : null,
     showAcceptStar
       ? { key: 'accept-star', label: 'Accept star', icon: 'handshake', className: 'command-button pulse', onClick: acceptStar, disabled: false }
@@ -1200,9 +1219,9 @@ export function App() {
           ]
         : [];
 
-  function saveRoomCode(roomCode: string) {
+  function saveRoomCode(roomCode: string, inputCode = roomCode) {
     localStorage.setItem(STORAGE_KEYS.lastRoomCode, roomCode);
-    setRoomCodeInput(roomCode);
+    setRoomCodeInput(inputCode);
   }
 
   function clearRoomState() {
@@ -1254,7 +1273,7 @@ export function App() {
 
     setRoom(response.room);
     setHand([]);
-    saveRoomCode(response.room.code);
+    saveRoomCode(response.room.code, response.room.displayCode ?? response.room.code);
   }
 
   async function joinRoom() {
@@ -1290,7 +1309,7 @@ export function App() {
 
     setRoom(response.room);
     setHand([]);
-    saveRoomCode(response.room.code);
+    saveRoomCode(response.room.code, response.room.displayCode ?? response.room.code);
     setInfo(response.reconnected ? 'Reconnected to room' : 'Joined room');
   }
 
@@ -1427,7 +1446,7 @@ export function App() {
   }
 
   async function copyRoomLink() {
-    if (!room?.code) return;
+    if (!room?.code || room.shareable === false) return;
     const shareUrl = buildShareUrl(room.code);
 
     try {
@@ -1444,15 +1463,22 @@ export function App() {
         <div className="topbar-left">
           {room && (
             <button
-              className="topbar-pill room-pill"
+              className={`topbar-pill room-pill${room.shareable === false ? ' is-private' : ''}`}
               onClick={copyRoomLink}
-              title="Copy room link"
-              aria-label={`Copy room link for room ${room.code}`}
+              disabled={room.shareable === false}
+              title={room.shareable === false ? 'Private CPU room' : 'Copy room link'}
+              aria-label={room.shareable === false ? `Private CPU room ${room.displayCode ?? room.code}` : `Copy room link for room ${room.code}`}
             >
-            <span className="topbar-pill-label">{room.code}</span>
-              <span className="material-symbols-rounded" aria-hidden>
-                content_copy
-              </span>
+              <span className="topbar-pill-label">{room.displayCode ?? room.code}</span>
+              {room.shareable === false ? (
+                <span className="material-symbols-rounded" aria-hidden>
+                  lock
+                </span>
+              ) : (
+                <span className="material-symbols-rounded" aria-hidden>
+                  content_copy
+                </span>
+              )}
             </button>
           )}
           {room && <span className="topbar-pill topbar-pill-static connection-pill">
@@ -1783,104 +1809,115 @@ export function App() {
             </section>
 
             <section className="command-deck panel">
-              <div className="command-top-row">
-                <div className="command-status-group" aria-label="Player resources">
-                  <span className={`status-item compact-status${resourcePulse.lives ? ` is-${resourcePulse.lives}` : ''}`}>
-                    <strong>
-                      <span className="material-symbols-rounded inline-icon" aria-hidden>
-                        favorite
-                      </span>
-                      Lives
-                    </strong>
-                    {game?.lives ?? '-'}
-                  </span>
-                  <span className={`status-item compact-status${resourcePulse.stars ? ` is-${resourcePulse.stars}` : ''}`}>
-                    <strong>
-                      <span className="material-symbols-rounded inline-icon" aria-hidden>
-                        star
-                      </span>
-                      Stars
-                    </strong>
-                    {game?.stars ?? '-'}
-                  </span>
-                  <span className={`status-item compact-status${resourcePulse.level ? ` is-${resourcePulse.level}` : ''}`}>
-                    <strong>
-                      <span className="material-symbols-rounded inline-icon" aria-hidden>
-                        floor
-                      </span>
-                      Level
-                    </strong>
-                    {game ? `${game.currentLevel}/${game.maxLevel}` : '-'}
-                  </span>
-                </div>
-              </div>
-
-              <div className="command-action-row">
-                {commandActions.map((action) => (
-                  <button
-                    key={action.key}
-                    className={`${action.className}${action.key === 'ready' || action.key === 'waiting' || action.key === 'hive-sync' ? ' full-span' : ''}`}
-                    onClick={action.onClick}
-                    disabled={action.disabled}
-                  >
-                    <span className="material-symbols-rounded" aria-hidden>{action.icon}</span>
-                    {action.label}
-                  </button>
-                ))}
-              </div>
-
-              <div className="command-hand-row">
-                <div className={`command-queue${primaryCard === null ? ' is-empty' : ''}`} aria-label="Upcoming cards">
-                  <div
-                    className={`card face queue-card queue-tail${queueTailCard !== null ? ' filled' : ' ghost'}`}
-                    aria-hidden={queueTailCard === null}
-                    style={queueTailCard !== null ? ({ borderColor: playerColorMap.get(playerId) ?? undefined } as any) : undefined}
-                  >
-                    {queueTailCard !== null ? <span className="center">{queueTailCard}</span> : <span className="queue-slot-ghost-dot" />}
-                  </div>
-                  <div className="queue-grid">
-                    <div className="queue-row queue-row-top">
-                      {queueTopRow.map((card, index) => (
-                        <div
-                          key={`queue-top-${index}`}
-                          className={`card face queue-card${card !== null ? ' filled' : ' ghost'}`}
-                          aria-hidden={card === null}
-                          style={card !== null ? ({ borderColor: playerColorMap.get(playerId) ?? undefined } as any) : undefined}
-                        >
-                          {card !== null ? <span className="center">{card}</span> : <span className="queue-slot-ghost-dot" />}
-                        </div>
-                      ))}
-                    </div>
-                    <div className="queue-row queue-row-bottom">
-                      {queueBottomRow.map((card, index) => (
-                        <div
-                          key={`queue-bottom-${index}`}
-                          className={`card face queue-card${card !== null ? ' filled' : ' ghost'}`}
-                          aria-hidden={card === null}
-                          style={card !== null ? ({ borderColor: playerColorMap.get(playerId) ?? undefined } as any) : undefined}
-                        >
-                          {card !== null ? <span className="center">{card}</span> : <span className="queue-slot-ghost-dot" />}
-                        </div>
-                      ))}
-                    </div>
+              <div className="command-panel">
+                <div className="command-top-row">
+                  <div className="command-status-group" aria-label="Player resources">
+                    <span className={`status-item compact-status${resourcePulse.lives ? ` is-${resourcePulse.lives}` : ''}`}>
+                      <strong>
+                        <span className="material-symbols-rounded inline-icon" aria-hidden>
+                          favorite
+                        </span>
+                        Lives
+                      </strong>
+                      {game?.lives ?? '-'}
+                    </span>
+                    <span className={`status-item compact-status${resourcePulse.stars ? ` is-${resourcePulse.stars}` : ''}`}>
+                      <strong>
+                        <span className="material-symbols-rounded inline-icon" aria-hidden>
+                          star
+                        </span>
+                        Stars
+                      </strong>
+                      {game?.stars ?? '-'}
+                    </span>
+                    <span className={`status-item compact-status${resourcePulse.level ? ` is-${resourcePulse.level}` : ''}`}>
+                      <strong>
+                        <span className="material-symbols-rounded inline-icon" aria-hidden>
+                          floor
+                        </span>
+                        Level
+                      </strong>
+                      {game ? `${game.currentLevel}/${game.maxLevel}` : '-'}
+                    </span>
                   </div>
                 </div>
 
-                {primaryCard !== null ? (
-                  <button
-                    className={`card face primary-card${isPlaying && primaryCard === minPlayableCard && !overlayBlocking ? ' playable' : ''}`}
-                    onClick={() => playCard(primaryCard)}
-                    disabled={!isPlaying || overlayBlocking || primaryCard !== minPlayableCard}
-                    title="Play this card"
-                    style={{ borderColor: playerColorMap.get(playerId) ?? undefined } as any}
-                  >
-                    <span className="corner tl">{primaryCard}</span>
-                    <span className="center">{primaryCard}</span>
-                    <span className="corner br">{primaryCard}</span>
-                  </button>
-                ) : (
-                  <div className="primary-card-empty">No card</div>
-                )}
+                <div className="command-action-row">
+                  {commandActions.map((action) => (
+                    <button
+                      key={action.key}
+                      className={`${action.className}${action.key === 'ready' || action.key === 'waiting' || action.key === 'hive-sync' ? ' full-span' : ''}`}
+                      onClick={action.onClick}
+                      disabled={action.disabled}
+                    >
+                      <span className="material-symbols-rounded" aria-hidden>{action.icon}</span>
+                      {action.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="deck-panel">
+                <div className="command-hand-row">
+                  <div className={`command-queue${showQueueCurveSlot ? ' has-curve' : ''}${primaryCard === null ? ' is-empty' : ''}`} aria-label="Upcoming cards">
+                    {showQueueCurveSlot && (
+                      <div
+                        className={`card face queue-card queue-curve${queueCurveSlot !== null ? ' filled' : ' ghost'}`}
+                        aria-hidden={queueCurveSlot === null}
+                        style={queueCardStyle(5, queueCurveSlot)}
+                      >
+                        {queueCurveSlot !== null ? <span className="center">{queueCurveSlot}</span> : <span className="queue-slot-ghost-dot" />}
+                      </div>
+                    )}
+                    <div className="queue-grid">
+                      <div className="queue-row queue-row-top">
+                        {queueTopRow.map((card, index) => (
+                          <div
+                            key={`queue-top-${index}`}
+                            className={`card face queue-card${card !== null ? ' filled' : ' ghost'}`}
+                            aria-hidden={card === null}
+                            style={queueCardStyle(index, card)}
+                          >
+                            {card !== null ? <span className="center">{card}</span> : <span className="queue-slot-ghost-dot" />}
+                          </div>
+                        ))}
+                      </div>
+                      {queueBottomRow.length > 0 && (
+                        <div className="queue-row queue-row-bottom">
+                          {queueBottomRow.map((card, index) => {
+                            const slotIndex = index + 6;
+                            return (
+                              <div
+                                key={`queue-bottom-${slotIndex}`}
+                                className={`card face queue-card${card !== null ? ' filled' : ' ghost'}`}
+                                aria-hidden={card === null}
+                                style={queueCardStyle(slotIndex, card)}
+                              >
+                                {card !== null ? <span className="center">{card}</span> : <span className="queue-slot-ghost-dot" />}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {primaryCard !== null ? (
+                    <button
+                      className={`card face primary-card${isPlaying && primaryCard === minPlayableCard && !overlayBlocking ? ' playable' : ''}`}
+                      onClick={() => playCard(primaryCard)}
+                      disabled={!isPlaying || overlayBlocking || primaryCard !== minPlayableCard}
+                      title="Play this card"
+                      style={{ borderColor: playerColorMap.get(playerId) ?? undefined } as any}
+                    >
+                      <span className="corner tl">{primaryCard}</span>
+                      <span className="center">{primaryCard}</span>
+                      <span className="corner br">{primaryCard}</span>
+                    </button>
+                  ) : (
+                    <div className="primary-card-empty">No card</div>
+                  )}
+                </div>
               </div>
             </section>
           </section>
