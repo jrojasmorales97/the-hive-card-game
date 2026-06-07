@@ -807,7 +807,7 @@ button:disabled {
 .card.pile {
   position: absolute;
   left: calc(50% - 53px);
-  top: calc(50% - 75px);
+  top: calc(50% - 88px);
   transform: translate(var(--x), var(--y)) rotate(var(--rot));
   z-index: var(--z);
   box-shadow: none;
@@ -1607,23 +1607,23 @@ button:disabled {
   }
 
   .center-pile {
-    width: 280px;
-    height: 206px;
+    width: 320px;
+    height: 232px;
   }
 
   .card.pile {
-    width: 78px;
-    height: 114px;
-    left: calc(50% - 39px);
-    top: calc(50% - 57px);
+    width: 106px;
+    height: 150px;
+    left: calc(50% - 53px);
+    top: calc(50% - 88px);
   }
 
   .card.pile .center {
-    font-size: 34px;
+    font-size: 42px;
   }
 
   .card.pile .corner {
-    font-size: 13px;
+    font-size: 12px;
   }
 
   .my-hand {
@@ -2187,6 +2187,11 @@ button:disabled {
   overflow: hidden;
 }
 
+.game-layout .center-pile {
+  width: 320px;
+  height: 232px;
+}
+
 .felt-stage::before {
   content: '';
   position: absolute;
@@ -2202,17 +2207,21 @@ button:disabled {
   z-index: 6;
   width: 112px;
   height: 152px;
-  padding: 12px;
+  padding: 0;
   border-radius: 12px;
-  border: 2px solid rgba(165, 126, 238, 0.5);
-  background:
-    linear-gradient(180deg, rgba(30, 16, 50, 0.95), rgba(20, 10, 34, 0.95)),
-    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.025) 0 2px, transparent 2px 6px);
-  backdrop-filter: blur(6px);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+  border: 0;
+  background: transparent;
+  box-shadow: none;
   overflow: hidden;
   display: grid;
   place-items: center;
+  perspective: 1000px;
+  transform-style: preserve-3d;
+  --flip-front-end: rotateY(0deg);
+  --flip-back-start: rotateY(180deg);
+  --flip-back-mid: rotateY(92deg);
+  --flip-front-mid: rotateY(-92deg);
+  --player-border-color: rgba(165, 126, 238, 0.5);
 }
 
 .corner-bottom-right {
@@ -2221,13 +2230,52 @@ button:disabled {
 }
 
 .own-player-corner {
-  background:
-    linear-gradient(180deg, rgba(58, 40, 88, 0.95), rgba(35, 22, 58, 0.95)),
-    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.03) 0 2px, transparent 2px 6px);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.34);
+  box-shadow: none;
 }
 
 .player-corner::before {
+  content: none;
+}
+
+.player-corner::after {
+  content: none;
+}
+
+.player-corner-face {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  padding: 12px;
+  border-radius: inherit;
+  backface-visibility: hidden;
+  transform-style: preserve-3d;
+  overflow: hidden;
+}
+
+.player-corner-front {
+  z-index: 2;
+  background:
+    linear-gradient(180deg, rgba(30, 16, 50, 0.95), rgba(20, 10, 34, 0.95)),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.025) 0 2px, transparent 2px 6px);
+  backdrop-filter: blur(6px);
+  box-shadow:
+    inset 0 0 0 2px var(--player-border-color),
+    0 10px 24px rgba(0, 0, 0, 0.28);
+  transform: var(--flip-front-end);
+}
+
+.own-player-corner .player-corner-front {
+  background:
+    linear-gradient(180deg, rgba(58, 40, 88, 0.95), rgba(35, 22, 58, 0.95)),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.03) 0 2px, transparent 2px 6px);
+  box-shadow:
+    inset 0 0 0 2px var(--player-border-color),
+    0 12px 28px rgba(0, 0, 0, 0.34);
+}
+
+.player-corner-front::before {
   content: '';
   position: absolute;
   inset: 0;
@@ -2235,6 +2283,203 @@ button:disabled {
     linear-gradient(135deg, rgba(255, 255, 255, 0.08), transparent 42%),
     linear-gradient(315deg, rgba(255, 255, 255, 0.03), transparent 48%);
   pointer-events: none;
+}
+
+.player-corner-back {
+  z-index: 1;
+  align-content: center;
+  gap: 8px;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(158, 166, 184, 0.12), transparent 34%),
+    linear-gradient(135deg, rgba(26, 24, 36, 0.96), rgba(15, 18, 26, 0.98)),
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.025) 0 5px, transparent 5px 11px);
+  color: rgba(196, 198, 208, 0.68);
+  font-size: 16px;
+  font-weight: 950;
+  letter-spacing: 0.16em;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.38);
+  box-shadow:
+    inset 0 0 0 2px rgba(180, 174, 198, 0.34),
+    inset 0 0 0 3px rgba(255, 255, 255, 0.025),
+    inset 0 0 30px rgba(0, 0, 0, 0.28);
+  filter: grayscale(0.42) saturate(0.6) brightness(0.82);
+  opacity: 0;
+  transform: var(--flip-back-start);
+}
+
+.player-corner-back-label {
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0.18em;
+  opacity: 0.72;
+}
+
+.player-corner-back-name {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  color: rgba(220, 222, 230, 0.78);
+  font-size: 18px;
+  line-height: 1.02;
+  font-weight: 900;
+  letter-spacing: 0.03em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.player-corner.is-round-out .player-corner-back {
+  animation: player-corner-back-flip-in 520ms ease-in-out forwards;
+}
+
+.player-corner.is-round-out .player-corner-front {
+  animation: player-corner-front-flip-out 520ms ease-in-out forwards;
+}
+
+.player-corner.is-round-returning .player-corner-back {
+  animation: player-corner-back-flip-out 520ms ease-in-out forwards;
+}
+
+.player-corner.is-round-returning .player-corner-front {
+  animation: player-corner-front-flip-in 520ms ease-in-out forwards;
+}
+
+.player-corner.flip-right {
+  --flip-front-mid: rotateY(92deg);
+  --flip-back-start: rotateY(-180deg);
+  --flip-back-mid: rotateY(-92deg);
+}
+
+.player-corner.flip-left {
+  --flip-front-mid: rotateY(-92deg);
+  --flip-back-start: rotateY(180deg);
+  --flip-back-mid: rotateY(92deg);
+}
+
+.player-corner.flip-up {
+  --flip-front-mid: rotateX(92deg);
+  --flip-back-start: rotateX(-180deg);
+  --flip-back-mid: rotateX(-92deg);
+}
+
+.player-corner.flip-down {
+  --flip-front-mid: rotateX(-92deg);
+  --flip-back-start: rotateX(180deg);
+  --flip-back-mid: rotateX(92deg);
+}
+
+.player-corner.flip-diagonal-right {
+  --flip-front-mid: rotate3d(1, 1, 0, 92deg);
+  --flip-back-start: rotate3d(1, 1, 0, -180deg);
+  --flip-back-mid: rotate3d(1, 1, 0, -92deg);
+}
+
+.player-corner.flip-diagonal-left {
+  --flip-front-mid: rotate3d(1, 1, 0, -92deg);
+  --flip-back-start: rotate3d(1, 1, 0, 180deg);
+  --flip-back-mid: rotate3d(1, 1, 0, 92deg);
+}
+
+.player-corner.flip-inverted-diagonal-right {
+  --flip-front-mid: rotate3d(-1, 1, 0, 92deg);
+  --flip-back-start: rotate3d(-1, 1, 0, -180deg);
+  --flip-back-mid: rotate3d(-1, 1, 0, -92deg);
+}
+
+.player-corner.flip-inverted-diagonal-left {
+  --flip-front-mid: rotate3d(1, -1, 0, 92deg);
+  --flip-back-start: rotate3d(1, -1, 0, -180deg);
+  --flip-back-mid: rotate3d(1, -1, 0, -92deg);
+}
+
+@keyframes player-corner-back-flip-in {
+  0% {
+    opacity: 0;
+    transform: var(--flip-back-start) scale(0.98);
+  }
+
+  49% {
+    opacity: 0;
+    transform: var(--flip-back-mid) scale(0.98);
+  }
+
+  50% {
+    opacity: 1;
+    transform: var(--flip-back-mid) scale(1);
+  }
+
+  100% {
+    opacity: 1;
+    transform: var(--flip-front-end) scale(1);
+  }
+}
+
+@keyframes player-corner-front-flip-out {
+  0% {
+    opacity: 1;
+    transform: var(--flip-front-end) scale(1);
+  }
+
+  49% {
+    opacity: 1;
+    transform: var(--flip-front-mid) scale(0.98);
+  }
+
+  50% {
+    opacity: 0;
+    transform: var(--flip-front-mid) scale(0.98);
+  }
+
+  100% {
+    opacity: 0;
+    transform: var(--flip-back-start) scale(0.98);
+  }
+}
+
+@keyframes player-corner-back-flip-out {
+  0% {
+    opacity: 1;
+    transform: var(--flip-front-end) scale(1);
+  }
+
+  49% {
+    opacity: 1;
+    transform: var(--flip-back-mid) scale(0.98);
+  }
+
+  50% {
+    opacity: 0;
+    transform: var(--flip-back-mid) scale(0.98);
+  }
+
+  100% {
+    opacity: 0;
+    transform: var(--flip-back-start) scale(0.98);
+  }
+}
+
+@keyframes player-corner-front-flip-in {
+  0% {
+    opacity: 0;
+    transform: var(--flip-front-mid) scale(0.98);
+  }
+
+  49% {
+    opacity: 0;
+    transform: var(--flip-front-mid) scale(0.98);
+  }
+
+  50% {
+    opacity: 1;
+    transform: var(--flip-front-mid) scale(0.98);
+  }
+
+  100% {
+    opacity: 1;
+    transform: var(--flip-front-end) scale(1);
+  }
 }
 
 .corner-top-left {
@@ -2250,6 +2495,30 @@ button:disabled {
 .corner-bottom-left {
   left: 14px;
   bottom: 18px;
+}
+
+.corner-top-center {
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.corner-bottom-center {
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+}
+
+.corner-left-center {
+  left: clamp(14px, calc(50% - 300px), 260px);
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.corner-right-center {
+  right: clamp(14px, calc(50% - 300px), 260px);
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 .player-corner-status-icon,
@@ -2268,6 +2537,21 @@ button:disabled {
   right: 10px;
 }
 
+.player-corner-cpu {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 1;
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: rgba(127, 224, 255, 0.14);
+  color: rgba(196, 241, 255, 0.9);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  line-height: 1;
+}
+
 .player-corner-name {
   position: relative;
   z-index: 1;
@@ -2275,14 +2559,27 @@ button:disabled {
   overflow: hidden;
   text-overflow: ellipsis;
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   text-align: center;
   font-size: 22px;
-  line-height: 1.02;
+  line-height: 1.08;
   font-weight: 800;
   letter-spacing: 0.02em;
   text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+
+.player-corner-name.compact {
+  font-size: 18px;
+  line-height: 1.08;
+  letter-spacing: 0.01em;
+}
+
+.player-corner-name.compact.tiny {
+  font-size: 16px;
+  line-height: 1.06;
+  letter-spacing: 0;
 }
 
 .player-corner-count {
@@ -2622,8 +2919,28 @@ button:disabled {
   }
 
   .felt-stage {
-    min-height: 320px;
+    min-height: 420px;
     border-radius: 18px;
+  }
+
+  .game-layout .center-pile {
+    width: clamp(190px, 46vw, 240px);
+    height: 166px;
+  }
+
+  .game-layout .card.pile {
+    width: 78px;
+    height: 114px;
+    left: calc(50% - 39px);
+    top: calc(50% - 66px);
+  }
+
+  .game-layout .card.pile .center {
+    font-size: 31px;
+  }
+
+  .game-layout .card.pile .corner {
+    font-size: 9px;
   }
 
   .player-corner {
@@ -2632,8 +2949,28 @@ button:disabled {
     padding: 8px;
   }
 
+  .player-corner-face {
+    padding: 8px;
+  }
+
   .player-corner-name {
     font-size: 15px;
+  }
+
+  .player-corner-name.compact {
+    font-size: 13px;
+  }
+
+  .player-corner-name.compact.tiny {
+    font-size: 12px;
+  }
+
+  .player-corner-back-name {
+    font-size: 13px;
+  }
+
+  .player-corner-back-label {
+    font-size: 9px;
   }
 
   .player-corner-count {
@@ -2654,6 +2991,12 @@ button:disabled {
 
   .player-corner-host {
     right: 8px;
+  }
+
+  .player-corner-cpu {
+    left: 8px;
+    bottom: 8px;
+    font-size: 9px;
   }
 
   .felt-banner {
@@ -2801,6 +3144,6 @@ button:disabled {
   }
 
   .felt-stage {
-    min-height: 460px;
+    min-height: 520px;
   }
 }

@@ -8,9 +8,10 @@ type Player = {
   connected: boolean;
   ready: boolean;
   handCount?: number;
+  isCpu?: boolean;
 };
 
-type GamePhase = 'focus' | 'playing' | 'paused' | 'level-complete' | 'game-over' | 'victory';
+type GamePhase = 'focus' | 'playing' | 'paused' | 'round-complete' | 'level-complete' | 'game-over' | 'victory';
 
 type RoomState = {
   code: string;
@@ -27,6 +28,7 @@ type RoomState = {
     pile: number[];
     pileHistory: PileCard[];
     lastPlayed: number | null;
+    mode?: 'normal' | 'dev-cpu';
     starProposal: { initiatorId: string; acceptedBy: string[] } | null;
   } | null;
 };
@@ -105,9 +107,17 @@ const STORAGE_KEYS = {
   lastRoomCode: 'th:lastRoomCode',
 };
 
-const PLAYER_PALETTE = ['#2EEBFF', '#FF2FAE', '#FFCC00', '#FFFFFF'] as const;
+const PLAYER_PALETTE = ['#2EEBFF', '#FF2FAE', '#FFCC00', '#FFFFFF', '#9DFF8A', '#FF8A3D', '#B88CFF', '#7CFFCB'] as const;
 const QUEUE_SLOT_COUNT = 11;
-const RIVAL_POSITIONS = ['corner-top-left', 'corner-top-right', 'corner-bottom-left'] as const;
+const RIVAL_POSITIONS = [
+  'corner-top-left',
+  'corner-top-right',
+  'corner-bottom-left',
+  'corner-top-center',
+  'corner-bottom-center',
+  'corner-left-center',
+  'corner-right-center',
+] as const;
 const SELF_POSITION = 'corner-bottom-right' as const;
 
 const REWARDS: Record<number, 'life' | 'star'> = {
@@ -234,18 +244,37 @@ function pileEntryOffset(corner: string): PileEntryOffset {
       return { x: 220, y: -170, rot: 18 };
     case 'corner-bottom-left':
       return { x: -220, y: 190, rot: -14 };
+    case 'corner-top-center':
+      return { x: 0, y: -190, rot: 4 };
+    case 'corner-bottom-center':
+      return { x: 0, y: 200, rot: -4 };
+    case 'corner-left-center':
+      return { x: -250, y: 0, rot: -10 };
+    case 'corner-right-center':
+      return { x: 250, y: 0, rot: 10 };
     case 'corner-bottom-right':
     default:
       return { x: 220, y: 190, rot: 14 };
   }
 }
 
+function playerCornerFlipClass(corner: string): string {
+  return 'flip-left';
+}
+
+function playerCornerNameClass(name: string): string {
+  const length = name.trim().length;
+  if (length >= 10) return 'player-corner-name compact tiny';
+  if (length >= 8) return 'player-corner-name compact';
+  return 'player-corner-name';
+}
+
 function pileStyle(index: number, value: number, entry: PileEntryOffset) {
   const seed = (value * 9301 + 49297) % 233280;
   const rnd = seed / 233280;
-  const x = Math.round((rnd - 0.5) * 42);
-  const y = Math.round((((seed * 31) % 233280) / 233280 - 0.5) * 28);
-  const rot = Math.round(((((seed * 17) % 233280) / 233280) - 0.5) * 16);
+  const x = Math.round((rnd - 0.5) * 24);
+  const y = Math.round((((seed * 31) % 233280) / 233280 - 0.5) * 16);
+  const rot = Math.round(((((seed * 17) % 233280) / 233280) - 0.5) * 10);
 
   return {
     '--x': `${x}px`,
@@ -933,7 +962,6 @@ export function App() {
     () =>
       playersList
         .filter((player) => player.id !== playerId)
-        .slice(0, RIVAL_POSITIONS.length)
         .map((player, index) => ({
           ...player,
           corner: RIVAL_POSITIONS[index] ?? 'corner-top-left',
@@ -1064,13 +1092,15 @@ export function App() {
     room.players.every((player) => player.connected && player.ready) &&
     isHost;
   const minPlayableCard = hand.length > 0 ? Math.min(...hand) : null;
+  const isMeRoundOut = !!me && isPlayerRoundOut(me, cardsRemainingForPlayer(me));
+  const isMeRoundReturning = !!me && isPlayerRoundReturning(me, cardsRemainingForPlayer(me));
   const showReady = !me?.ready && ((room?.status === 'lobby' && (room?.players.length ?? 0) >= 2) || canReadyForRound);
   const showNotReady = Boolean(me?.ready) && (room?.status === 'lobby' || canReadyForRound);
   const showStart = room?.status === 'lobby' && canStart;
   const overlayBlocking = countdown !== null;
-  const showPause = isPlaying && !overlayBlocking;
-  const showProposeStar = isPlaying && (game?.stars ?? 0) > 0 && !hasStarProposal && !overlayBlocking;
-  const showAcceptStar = isPlaying && hasStarProposal && !alreadyAcceptedStar && !overlayBlocking;
+  const showPause = isPlaying && !isMeRoundOut && !overlayBlocking;
+  const showProposeStar = isPlaying && !isMeRoundOut && (game?.stars ?? 0) > 0 && !hasStarProposal && !overlayBlocking;
+  const showAcceptStar = isPlaying && !isMeRoundOut && hasStarProposal && !alreadyAcceptedStar && !overlayBlocking;
   const showHivePlaceholder = Boolean(game && (game.phase === 'focus' || countdown !== null));
   const showHivePlaceholderAction =
     showHivePlaceholder && !showReady && !showNotReady && !showStart && !showPause && !showProposeStar && !showAcceptStar;
@@ -1329,6 +1359,24 @@ export function App() {
     return visibleBacksCountForRival(player);
   }
 
+  function isPlayerRoundOut(player: Player, cardsRemaining: number): boolean {
+    return Boolean(
+      game &&
+      (game.phase === 'playing' || game.phase === 'paused') &&
+      cardsRemaining === 0 &&
+      player.connected,
+    );
+  }
+
+  function isPlayerRoundReturning(player: Player, cardsRemaining: number): boolean {
+    return Boolean(
+      game &&
+      game.phase === 'round-complete' &&
+      cardsRemaining === 0 &&
+      player.connected,
+    );
+  }
+
   async function leaveRoom(): Promise<boolean> {
     if (!room) {
       clearRoomState();
@@ -1514,50 +1562,72 @@ export function App() {
             <section className={`felt-stage${isPlaying ? ' is-playing' : ''}`}>
               {rivals.map((player) => {
                 const cardsRemaining = cardsRemainingForPlayer(player);
+                const isRoundOut = isPlayerRoundOut(player, cardsRemaining);
+                const isRoundReturning = isPlayerRoundReturning(player, cardsRemaining);
                 return (
                   <article
                     key={player.id}
-                    className={`player-corner ${player.corner}`}
+                    className={`player-corner ${player.corner} ${playerCornerFlipClass(player.corner)}${isRoundOut ? ' is-round-out' : ''}${isRoundReturning ? ' is-round-returning' : ''}`}
                     ref={setPlayerCornerRef(player.id)}
-                    style={{ borderColor: playerColorMap.get(player.id) ?? undefined } as any}
+                    style={{ '--player-border-color': playerColorMap.get(player.id) ?? undefined } as any}
+                    title={isRoundOut ? `${player.name} finished this round` : undefined}
                   >
-                    <span
-                      className="material-symbols-rounded player-corner-status-icon"
-                      aria-label={statusLabelForSeat(player, game?.phase)}
-                      title={statusLabelForSeat(player, game?.phase)}
-                    >
-                        {statusIconForSeat(player, game?.phase)}
-                    </span>
-                    {player.id === room.hostId && (
-                      <span className="material-symbols-rounded player-corner-host" aria-label="Host">crown</span>
-                    )}
-                    <strong className="player-corner-name" style={{ color: playerColorMap.get(player.id) }}>
-                      {player.name}
-                    </strong>
-                    <span className="player-corner-count">x{cardsRemaining}</span>
+                    <div className="player-corner-face player-corner-front">
+                      <span
+                        className="material-symbols-rounded player-corner-status-icon"
+                        aria-label={statusLabelForSeat(player, game?.phase)}
+                        title={statusLabelForSeat(player, game?.phase)}
+                      >
+                          {statusIconForSeat(player, game?.phase)}
+                      </span>
+                      {player.id === room.hostId && (
+                        <span className="material-symbols-rounded player-corner-host" aria-label="Host">crown</span>
+                      )}
+                      {player.isCpu && (
+                        <span className="player-corner-cpu" aria-label="CPU player" title="CPU player">CPU</span>
+                      )}
+                      <strong className={playerCornerNameClass(player.name)} style={{ color: playerColorMap.get(player.id) }}>
+                        {player.name}
+                      </strong>
+                      <span className="player-corner-count">x{cardsRemaining}</span>
+                    </div>
+                    <div className="player-corner-face player-corner-back" aria-hidden>
+                      <span className="player-corner-back-label">DONE</span>
+                      <strong className="player-corner-back-name">{player.name}</strong>
+                    </div>
                   </article>
                 );
               })}
               {me && (
                 <article
-                  className={`player-corner own-player-corner ${SELF_POSITION}`}
+                  className={`player-corner own-player-corner ${SELF_POSITION} ${playerCornerFlipClass(SELF_POSITION)}${isMeRoundOut ? ' is-round-out' : ''}${isMeRoundReturning ? ' is-round-returning' : ''}`}
                   ref={setPlayerCornerRef(me.id)}
-                  style={{ borderColor: playerColorMap.get(me.id) ?? undefined } as any}
+                  style={{ '--player-border-color': playerColorMap.get(me.id) ?? undefined } as any}
+                  title={isMeRoundOut ? 'You finished this round' : undefined}
                 >
-                  <span
-                    className="material-symbols-rounded player-corner-status-icon"
-                    aria-label={statusLabelForSeat(me, game?.phase)}
-                    title={statusLabelForSeat(me, game?.phase)}
-                  >
-                    {statusIconForSeat(me, game?.phase)}
-                  </span>
-                  {me.id === room.hostId && (
-                    <span className="material-symbols-rounded player-corner-host" aria-label="Host">crown</span>
-                  )}
-                  <strong className="player-corner-name" style={{ color: playerColorMap.get(me.id) }}>
-                    {me.name}
-                  </strong>
-                  <span className="player-corner-count">x{cardsRemainingForPlayer(me)}</span>
+                  <div className="player-corner-face player-corner-front">
+                    <span
+                      className="material-symbols-rounded player-corner-status-icon"
+                      aria-label={statusLabelForSeat(me, game?.phase)}
+                      title={statusLabelForSeat(me, game?.phase)}
+                    >
+                      {statusIconForSeat(me, game?.phase)}
+                    </span>
+                    {me.id === room.hostId && (
+                      <span className="material-symbols-rounded player-corner-host" aria-label="Host">crown</span>
+                    )}
+                    {me.isCpu && (
+                      <span className="player-corner-cpu" aria-label="CPU player" title="CPU player">CPU</span>
+                    )}
+                    <strong className={playerCornerNameClass(me.name)} style={{ color: playerColorMap.get(me.id) }}>
+                      {me.name}
+                    </strong>
+                    <span className="player-corner-count">x{cardsRemainingForPlayer(me)}</span>
+                  </div>
+                  <div className="player-corner-face player-corner-back" aria-hidden>
+                    <span className="player-corner-back-label">DONE</span>
+                    <strong className="player-corner-back-name">{me.name}</strong>
+                  </div>
                 </article>
               )}
 
