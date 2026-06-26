@@ -1,1 +1,1 @@
-{"root":["./src/App.tsx","./src/main.tsx"],"version":"5.9.3"}
+{"root":["./src/App.tsx","./src/connectionStatus.test.ts","./src/connectionStatus.ts","./src/finalScoreUi.test.ts","./src/finalScoreUi.ts","./src/gameUi.test.ts","./src/gameUi.ts","./src/levelFlow.test.ts","./src/levelFlow.ts","./src/main.tsx","./src/messageTiming.test.ts","./src/messageTiming.ts","./src/starUi.test.ts","./src/starUi.ts"],"version":"5.9.3"}

@@ -1,0 +1,254 @@
+{
+  "apps/backend/src/finalScoring.test.ts": {
+    "mtime": 1782320062169.1597,
+    "hash": "02afc5c16725247a98895ec161ea604a"
+  },
+  "apps/backend/src/finalScoring.ts": {
+    "mtime": 1782320048681.1562,
+    "hash": "d6b9f85b81214876444cabccec831fc2"
+  },
+  "apps/backend/src/gameTiming.test.ts": {
+    "mtime": 1782312633138.1177,
+    "hash": "8fa38bc7edf8de30f0b134f96e40194b"
+  },
+  "apps/backend/src/gameTiming.ts": {
+    "mtime": 1782312633137.1177,
+    "hash": "c397e828f6baf404f2d49197cccf29ec"
+  },
+  "apps/backend/src/index.ts": {
+    "mtime": 1782456547594.1326,
+    "hash": "72488721cb1f0af14522f687b5397c93"
+  },
+  "apps/frontend/src/App.tsx": {
+    "mtime": 1782456623249.8423,
+    "hash": "c6f734b88f02a857cc40c55b3c650180"
+  },
+  "apps/frontend/src/connectionStatus.test.ts": {
+    "mtime": 1782315465744.5913,
+    "hash": "d5a0c643014eb64972fb6f9486e9a834"
+  },
+  "apps/frontend/src/connectionStatus.ts": {
+    "mtime": 1782315465743.5913,
+    "hash": "8af0af788788f4a111cbac70884ecaff"
+  },
+  "apps/frontend/src/gameUi.test.ts": {
+    "mtime": 1782312747674.4539,
+    "hash": "803171cf92cd415141d4c09cd36750f6"
+  },
+  "apps/frontend/src/gameUi.ts": {
+    "mtime": 1782312747673.4539,
+    "hash": "1e04742d5d82489281081e918c17da93"
+  },
+  "apps/frontend/src/main.tsx": {
+    "mtime": 1782229866468.8901,
+    "hash": "07eada8878389ce262fa6c5aeb6fa36f"
+  },
+  "apps/frontend/vite.config.ts": {
+    "mtime": 1782229866468.8901,
+    "hash": "6cb657e9f72ee59e7ac251b8ad688e31"
+  },
+  "AGENTS.md": {
+    "mtime": 1782229866462.6697,
+    "hash": "d682602659a1c7d4c02ff682482529da"
+  },
+  "README.md": {
+    "mtime": 1782229866462.6697,
+    "hash": "86bf1f8b9b2ce253a750eb432b77a063"
+  },
+  "apps/frontend/index.html": {
+    "mtime": 1782229866467.8914,
+    "hash": "b8cd284d6b11e78b74d11e90382ab02b"
+  },
+  "docker-compose.yml": {
+    "mtime": 1782229866468.8901,
+    "hash": "aae7c4fe6a3e0767d9053064dc066460"
+  },
+  "plan.md": {
+    "mtime": 1782317139583.7822,
+    "hash": "0fc14399ede976a927a2dc1786d0e834"
+  },
+  "render.yaml": {
+    "mtime": 1782229866468.8901,
+    "hash": "db050d08a91ece8494b997705ed6eae9"
+  },
+  ".playwright-mcp/after-1024x768-game-devcpu.png": {
+    "mtime": 1782229866426.003,
+    "hash": "8d4ca0686e3b05049a63aa70cc76f6a9"
+  },
+  ".playwright-mcp/after-1366x768-game-devcpu.png": {
+    "mtime": 1782229866426.003,
+    "hash": "8c9dbfbc7a8b726dada8cfccc3ab3b31"
+  },
+  ".playwright-mcp/after-360x740-game-devcpu.png": {
+    "mtime": 1782229866429.3364,
+    "hash": "7e43b1c0e961b1b95bfbae3ff362a357"
+  },
+  ".playwright-mcp/after-372x667-game-devcpu.png": {
+    "mtime": 1782229866429.3364,
+    "hash": "0c8f0457f6a2ab435fd66e6a517ac37e"
+  },
+  ".playwright-mcp/after-372x812-game-devcpu.png": {
+    "mtime": 1782229866429.3364,
+    "hash": "167c0b05852789f768797cc8a46b6324"
+  },
+  ".playwright-mcp/after-390x844-game-devcpu.png": {
+    "mtime": 1782229866429.3364,
+    "hash": "ab6b26738aaf4730431ed0a85a4af2f3"
+  },
+  ".playwright-mcp/after-414x896-game-devcpu.png": {
+    "mtime": 1782229866432.6697,
+    "hash": "53b6b5e866be66067fd58960e12e12b5"
+  },
+  ".playwright-mcp/after-768x1024-game-devcpu.png": {
+    "mtime": 1782229866432.6697,
+    "hash": "b1a908896c661fb2426cb0122d54a7ff"
+  },
+  ".playwright-mcp/baseline-1024x768-game-devcpu.png": {
+    "mtime": 1782229866436.003,
+    "hash": "8d79643a8e4498a4d433a2c389a638de"
+  },
+  ".playwright-mcp/baseline-1366x768-game-devcpu.png": {
+    "mtime": 1782229866436.003,
+    "hash": "ec5bc6be55194c21f00d6ec46bc7aa7f"
+  },
+  ".playwright-mcp/baseline-360x740-game-devcpu.png": {
+    "mtime": 1782229866436.003,
+    "hash": "f832f350ec1acd29b9cc1cf9443aaa62"
+  },
+  ".playwright-mcp/baseline-372-game-devcpu.png": {
+    "mtime": 1782229866436.003,
+    "hash": "04d0a903c14819c709a92ae12629bec0"
+  },
+  ".playwright-mcp/baseline-372-lobby-devcpu.png": {
+    "mtime": 1782229866439.3364,
+    "hash": "d874f9f2c93265d13600c3a58f852665"
+  },
+  ".playwright-mcp/baseline-372-lobby.png": {
+    "mtime": 1782229866439.3364,
+    "hash": "e1187fb253429338e14026d0391f2bc9"
+  },
+  ".playwright-mcp/baseline-372x667-game-devcpu.png": {
+    "mtime": 1782229866439.3364,
+    "hash": "2ab4fdd17c9384fedc84640228720c01"
+  },
+  ".playwright-mcp/baseline-372x812-game-devcpu.png": {
+    "mtime": 1782229866439.3364,
+    "hash": "0d9bfe7cfc4c26307967975a32f115dc"
+  },
+  ".playwright-mcp/baseline-390x844-game-devcpu.png": {
+    "mtime": 1782229866439.3364,
+    "hash": "094d0514c12ca9c888c69caa9e467365"
+  },
+  ".playwright-mcp/baseline-414x896-game-devcpu.png": {
+    "mtime": 1782229866442.6697,
+    "hash": "0358eddde503a7aefa2de083c14d9244"
+  },
+  ".playwright-mcp/baseline-768x1024-game-devcpu.png": {
+    "mtime": 1782229866442.6697,
+    "hash": "800ba95a999d3c9b75f89467adce58b6"
+  },
+  ".playwright-mcp/debug-360-rejoin.png": {
+    "mtime": 1782229866442.6697,
+    "hash": "2cfbbd21ef837824d4193fd274268899"
+  },
+  ".playwright-mcp/debug-372x667-after-join.png": {
+    "mtime": 1782229866442.6697,
+    "hash": "763c1dd1ac0053bdc17a4a6e08b6290c"
+  },
+  ".playwright-mcp/debug-cpuon1-join.png": {
+    "mtime": 1782229866446.003,
+    "hash": "adbf08259b9cdc52b62bd5148e22b35b"
+  },
+  ".playwright-mcp/final-1024x768-game-devcpu.png": {
+    "mtime": 1782229866446.003,
+    "hash": "f947df2a97e7873b968665b71f7e6fad"
+  },
+  ".playwright-mcp/final-1366x768-game-devcpu.png": {
+    "mtime": 1782229866449.3364,
+    "hash": "7bb4e81adfdcbf01a8ee4d069a2c7a91"
+  },
+  ".playwright-mcp/final-360x740-game-devcpu.png": {
+    "mtime": 1782229866449.3364,
+    "hash": "a08961183dd666a8db6718dd76c6c9d3"
+  },
+  ".playwright-mcp/final-372x667-game-devcpu.png": {
+    "mtime": 1782229866449.3364,
+    "hash": "d3436740fcd8d71d75bc2c10eb4ba1d8"
+  },
+  ".playwright-mcp/final-372x812-game-devcpu.png": {
+    "mtime": 1782229866449.3364,
+    "hash": "b58ae0118c9f5f24e996e49d8cda99ed"
+  },
+  ".playwright-mcp/final-390x844-game-devcpu.png": {
+    "mtime": 1782229866452.6697,
+    "hash": "ef47dc3566775a033c3dc8996ac05ea4"
+  },
+  ".playwright-mcp/final-414x896-game-devcpu.png": {
+    "mtime": 1782229866452.6697,
+    "hash": "5ad5cadd7f6b7e65e225dea05e26f9bc"
+  },
+  ".playwright-mcp/final-768x1024-game-devcpu.png": {
+    "mtime": 1782229866452.6697,
+    "hash": "e6bf9002e9334c81bb47b117be2b6190"
+  },
+  ".playwright-mcp/final2-1366x768-game-devcpu.png": {
+    "mtime": 1782229866456.003,
+    "hash": "b16fd98c4305ec86c60e4d2a2b920f30"
+  },
+  ".playwright-mcp/final2-360x740-game-devcpu.png": {
+    "mtime": 1782229866456.003,
+    "hash": "b3b6a044c476a8a0ceec98b67fa32a30"
+  },
+  ".playwright-mcp/final2-372x667-game-devcpu.png": {
+    "mtime": 1782229866456.003,
+    "hash": "f9db8920f559c0c9c8de947b8edc187a"
+  },
+  ".playwright-mcp/final3-372x667-game-devcpu.png": {
+    "mtime": 1782229866456.003,
+    "hash": "cabbf4d21a642a2b7250194d26abd719"
+  },
+  ".playwright-mcp/pause-full-width-372x667-v2.png": {
+    "mtime": 1782229866456.003,
+    "hash": "7c5ebe3965df5b3c1871ffe4516ec6ca"
+  },
+  ".playwright-mcp/pause-full-width-372x667.png": {
+    "mtime": 1782229866456.003,
+    "hash": "bfda7792fdeda79aab1692a101fa7c86"
+  },
+  ".playwright-mcp/pause-full-width-level2-372x667.png": {
+    "mtime": 1782229866459.3364,
+    "hash": "b6081a96721e281e7eaaf2a9087c1ea0"
+  },
+  ".playwright-mcp/queue-cpuon1-372x812.png": {
+    "mtime": 1782229866459.3364,
+    "hash": "e7d744d8c1a81fd2a1dc775d32ceb041"
+  },
+  ".playwright-mcp/queue-cpuon1-level2-filled-372x812.png": {
+    "mtime": 1782229866459.3364,
+    "hash": "dc331291f01a819ccdb4ed830d2ab066"
+  },
+  ".playwright-mcp/queue-cpuon7-level1.png": {
+    "mtime": 1782229866459.3364,
+    "hash": "3c286268ca756dcaa4ac015df895c49e"
+  },
+  ".playwright-mcp/queue-shape-cpuon1.png": {
+    "mtime": 1782229866462.6697,
+    "hash": "c6fc967bb4d24abc639ff6a79fd380c5"
+  },
+  ".playwright-mcp/queue-shape-cpuon3.png": {
+    "mtime": 1782229866462.6697,
+    "hash": "d7f37fc00a40811cf1aa95fabbe229fe"
+  },
+  ".playwright-mcp/reward-layer-clean-372x667.png": {
+    "mtime": 1782229866462.6697,
+    "hash": "c7c3626298a8119a229e7ecc1bc868f3"
+  },
+  ".playwright-mcp/reward-spaced-372x667.png": {
+    "mtime": 1782229866462.6697,
+    "hash": "d4e0733d753c201d188a5e1ec8f16b18"
+  },
+  ".playwright-mcp/star-overlay-cpu-paused.png": {
+    "mtime": 1782229866462.6697,
+    "hash": "3942272493a6abe9c11074cca95b50c8"
+  }
+}

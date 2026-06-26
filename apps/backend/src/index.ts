@@ -1,6 +1,20 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { Server } from 'socket.io';
+import { calculateFinalResults, type FinalPlayerResult } from './finalScoring.js';
+import {
+  ERROR_LOCK_MS,
+  LEVEL_COMPLETE_LOCK_MS,
+  STAR_RESOLUTION_LOCK_MS,
+  createInteractionLock,
+  discardLowestCardPerPlayer,
+  discardLowerCards,
+  getDealLockDuration,
+  isInteractionLockActive,
+  type InteractionLock,
+  type StarDiscardPreview,
+} from './gameTiming.js';
+import { nextLevelAdvanceDelayMs, nextLevelReadyLockMs } from './levelFlow.js';
 
 type Player = {
   id: string;
@@ -22,6 +36,8 @@ type StarProposal = {
 type PileEntry = {
   value: number;
   playerId: string;
+  ts: number;
+  source: 'manual' | 'star';
 };
 
 type GameState = {
@@ -36,6 +52,10 @@ type GameState = {
   rewardMap: Record<number, RewardType>;
   mode: 'normal' | 'dev-cpu';
   starProposal: StarProposal | null;
+  interactionLock: InteractionLock | null;
+  startedAt: number;
+  errorCounts: Record<string, number>;
+  finalResults: FinalPlayerResult[] | null;
 };
 
 type Room = {
@@ -60,6 +80,7 @@ const playerRoom = new Map<string, string>();
 const socketPlayer = new Map<string, string>();
 const cpuPlayTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const levelCompleteTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const interactionLockTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let logSeq = 0;
 
 const MAX_PLAYERS = 8;
@@ -77,11 +98,10 @@ const PORT = Number(process.env.PORT ?? 3001);
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN ?? 'http://localhost:5173';
 const ALLOW_ALL_ORIGINS = CLIENT_ORIGIN.trim() === '*';
 const DEV_CPU_PLAY_DELAY_MS = clampNumber(Number(process.env.DEV_CPU_PLAY_DELAY_MS ?? 900), 100, 10_000);
-const STAR_RESOLVED_CPU_DELAY_MS = 3000;
-const ROUND_COUNTDOWN_DELAY_MS = 3600;
+const ROUND_COUNTDOWN_DELAY_MS = 3000;
 const ROUND_OUT_FLIP_MS = 520;
 const ROUND_OUT_UNFLIP_MS = 520;
-const ERROR_OVERLAY_DELAY_MS = 4200;
+const RESTART_BANNER_DELAY_MS = 5000;
 
 const app = Fastify({ logger: true });
 
@@ -122,6 +142,10 @@ function createUniqueRoomCode(): string {
 }
 
 function serializeRoom(room: Room) {
+  if (room.game && !isInteractionLockActive(room.game.interactionLock)) {
+    room.game.interactionLock = null;
+  }
+
   const players = Object.values(room.players).map((player) => ({
     id: player.id,
     name: player.name,
@@ -142,6 +166,8 @@ function serializeRoom(room: Room) {
         pileHistory: room.game.pileHistory,
         lastPlayed: room.game.lastPlayed,
         mode: room.game.mode,
+        interactionLock: room.game.interactionLock,
+        finalResults: room.game.finalResults,
         starProposal: room.game.starProposal
           ? {
               initiatorId: room.game.starProposal.initiatorId,
@@ -270,6 +296,67 @@ function clearLevelCompleteTimer(roomCode: string) {
   levelCompleteTimers.delete(roomCode);
 }
 
+function clearInteractionLockTimer(roomCode: string) {
+  const timer = interactionLockTimers.get(roomCode);
+  if (!timer) return;
+
+  clearTimeout(timer);
+  interactionLockTimers.delete(roomCode);
+}
+
+function hasActiveInteractionLock(room: Room): boolean {
+  if (!room.game) return false;
+  if (isInteractionLockActive(room.game.interactionLock)) return true;
+  room.game.interactionLock = null;
+  return false;
+}
+
+function setInteractionLock(
+  room: Room,
+  roomCode: string,
+  reason: InteractionLock['reason'],
+  durationMs: number,
+  onRelease?: (latestRoom: Room) => void,
+) {
+  if (!room.game) return;
+
+  clearInteractionLockTimer(roomCode);
+  const lock = createInteractionLock(reason, durationMs);
+  room.game.interactionLock = lock;
+
+  const timer = setTimeout(() => {
+    interactionLockTimers.delete(roomCode);
+
+    const latestRoom = rooms.get(roomCode);
+    if (!latestRoom?.game || latestRoom !== room) return;
+    if (!latestRoom.game.interactionLock) return;
+    if (latestRoom.game.interactionLock.reason !== lock.reason || latestRoom.game.interactionLock.until !== lock.until) return;
+
+    latestRoom.game.interactionLock = null;
+    onRelease?.(latestRoom);
+    emitRoomUpdate(roomCode);
+  }, durationMs);
+
+  interactionLockTimers.set(roomCode, timer);
+}
+
+function beginRoundCountdown(room: Room, roomCode: string) {
+  if (!room.game || hasActiveInteractionLock(room)) return;
+
+  clearCpuTurn(roomCode);
+  setInteractionLock(room, roomCode, 'countdown', ROUND_COUNTDOWN_DELAY_MS, (latestRoom) => {
+    if (!latestRoom.game) return;
+    if (latestRoom.game.phase !== 'focus' && latestRoom.game.phase !== 'paused') return;
+
+    latestRoom.game.phase = 'playing';
+    Object.values(latestRoom.players).forEach((player) => {
+      player.ready = false;
+    });
+
+    scheduleCpuTurn(roomCode, 0);
+  });
+}
+
 function findGlobalLowestCard(room: Room): { player: Player; card: number } | null {
   return Object.values(room.players).reduce<{ player: Player; card: number } | null>((lowest, player) => {
     if (player.hand.length === 0) return lowest;
@@ -308,7 +395,9 @@ function hasAllReadyForRound(room: Room): boolean {
 function startGameInRoom(room: Room, roomCode: string) {
   const playerCount = Object.values(room.players).length;
   const maxLevel = maxLevelByPlayers(playerCount);
+  const startedAt = Date.now();
   clearLevelCompleteTimer(roomCode);
+  clearInteractionLockTimer(roomCode);
 
   room.status = 'in-game';
   room.game = {
@@ -323,31 +412,25 @@ function startGameInRoom(room: Room, roomCode: string) {
     rewardMap: buildRewardMap(maxLevel),
     mode: gameModeForRoom(room),
     starProposal: null,
+    interactionLock: null,
+    startedAt,
+    errorCounts: {},
+    finalResults: null,
   };
 
-  dealLevel(room);
+  dealLevel(room, false);
+  setInteractionLock(room, roomCode, 'dealing', getDealLockDuration(room.game.currentLevel), (latestRoom) => {
+    if (!latestRoom.game) return;
+    if (latestRoom.game.phase !== 'focus') return;
+    if (hasAllReadyForRound(latestRoom)) beginRoundCountdown(latestRoom, roomCode);
+  });
   room.game.phase = 'focus';
   emitRoomUpdate(roomCode);
   io.to(roomCode).emit('game:started', {
-    startedAt: Date.now(),
-    message: 'Partida iniciada. Preparados…',
+    startedAt,
+    message: 'Game started. Get ready...',
   });
   emitGameLog(roomCode, 'game:started', { byPlayerId: room.hostId, byPlayerName: getPlayerName(room, room.hostId) });
-
-  // Primera ronda: transición automática a playing (sin pedir segundo listo).
-  setTimeout(() => {
-    const latestRoom = rooms.get(roomCode);
-    if (!latestRoom || latestRoom !== room || !latestRoom.game) return;
-    if (latestRoom.game.phase !== 'focus') return;
-
-    latestRoom.game.phase = 'playing';
-    Object.values(latestRoom.players).forEach((player) => {
-      player.ready = false;
-    });
-
-    emitRoomUpdate(roomCode);
-    scheduleCpuTurn(roomCode, ROUND_COUNTDOWN_DELAY_MS);
-  }, 500);
 }
 
 function countRemainingCards(room: Room): number {
@@ -369,7 +452,19 @@ function getLevelReward(room: Room): RewardType | null {
   return room.game.rewardMap[room.game.currentLevel] ?? null;
 }
 
-function dealLevel(room: Room) {
+function finalizeGameResults(room: Room) {
+  if (!room.game) return;
+
+  room.game.finalResults = calculateFinalResults({
+    players: Object.values(room.players).map((player) => ({ id: player.id, name: player.name, isCpu: player.isCpu })),
+    plays: room.game.pileHistory,
+    gameStartedAt: room.game.startedAt,
+    completedAt: Date.now(),
+    errorCounts: room.game.errorCounts,
+  });
+}
+
+function dealLevel(room: Room, resetReady = true) {
   if (!room.game) return;
 
   const level = room.game.currentLevel;
@@ -382,12 +477,12 @@ function dealLevel(room: Room) {
 
   Object.values(room.players).forEach((player) => {
     player.hand = deck.splice(0, level).sort((a, b) => a - b);
-    player.ready = false;
+    if (resetReady || player.isCpu) player.ready = Boolean(player.isCpu);
   });
 
   room.game.phase = 'focus';
   room.game.starProposal = null;
-  markCpuPlayersReady(room);
+  room.game.finalResults = null;
 }
 
 function completeLevelOrGame(room: Room, roomCode: string) {
@@ -414,10 +509,13 @@ function completeLevelOrGame(room: Room, roomCode: string) {
   }
 
   if (room.game.currentLevel >= room.game.maxLevel) {
+    finalizeGameResults(room);
     room.game.phase = 'victory';
     emitGameLog(roomCode, 'game:victory', { levelCompleted, maxLevel: room.game.maxLevel });
     return;
   }
+
+  const nextLevelDelayMs = nextLevelAdvanceDelayMs(room.game.interactionLock);
 
   setTimeout(() => {
     const latestRoom = rooms.get(roomCode);
@@ -426,10 +524,16 @@ function completeLevelOrGame(room: Room, roomCode: string) {
 
     latestRoom.game.currentLevel += 1;
     dealLevel(latestRoom);
+    const nextLevelLockMs = nextLevelReadyLockMs(LEVEL_COMPLETE_LOCK_MS, getDealLockDuration(latestRoom.game.currentLevel));
+    setInteractionLock(latestRoom, roomCode, 'level-complete', nextLevelLockMs, () => {
+      if (!latestRoom.game) return;
+      if (latestRoom.game.phase !== 'focus') return;
+      if (hasAllReadyForRound(latestRoom)) beginRoundCountdown(latestRoom, roomCode);
+    });
     emitRoomUpdate(roomCode);
     io.to(roomCode).emit('game:next-level-ready', { level: latestRoom.game.currentLevel });
     emitGameLog(roomCode, 'game:next-level-ready', { level: latestRoom.game.currentLevel });
-  }, 2200);
+  }, nextLevelDelayMs);
 }
 
 function scheduleLevelCompletionAfterRoundOut(room: Room, roomCode: string) {
@@ -466,34 +570,37 @@ function resolveErrorAndDiscard(room: Room, playedCard: number) {
   if (!room.game) return;
 
   room.game.lives = Math.max(0, room.game.lives - 1);
-  Object.values(room.players).forEach((player) => {
-    player.hand = player.hand.filter((card) => card >= playedCard);
-  });
+  discardLowerCards(room.players, playedCard);
 }
 
 function playCardInRoom(room: Room, roomCode: string, player: Player, card: number): { ok: boolean; error?: string } {
   if (!room.game) {
-    return { ok: false, error: 'Juego inválido' };
+    return { ok: false, error: 'Invalid game state' };
+  }
+
+  if (hasActiveInteractionLock(room)) {
+    return { ok: false, error: 'Wait until the current transition finishes' };
   }
 
   if (room.game.phase !== 'playing') {
-    return { ok: false, error: 'La ronda no está activa' };
+    return { ok: false, error: 'The round is not active' };
   }
 
   if (!Number.isInteger(card)) {
-    return { ok: false, error: 'Carta inválida' };
+    return { ok: false, error: 'Invalid card' };
   }
 
   if (!player.hand.includes(card)) {
-    return { ok: false, error: 'No tienes esa carta' };
+    return { ok: false, error: 'You do not have that card' };
   }
 
   const minCard = Math.min(...player.hand);
   if (card !== minCard) {
-    return { ok: false, error: 'Debes jugar tu carta más baja primero' };
+    return { ok: false, error: 'You must play your lowest card first' };
   }
 
   player.hand = player.hand.filter((value) => value !== card);
+  const playedAt = Date.now();
 
   const blockingCards = Object.values(room.players)
     .flatMap((handOwner) =>
@@ -507,7 +614,7 @@ function playCardInRoom(room: Room, roomCode: string, player: Player, card: numb
   if (hasLowerCardInAnyHand) clearCpuTurn(roomCode);
 
   room.game.pile.push(card);
-  room.game.pileHistory.push({ value: card, playerId: player.id });
+  room.game.pileHistory.push({ value: card, playerId: player.id, ts: playedAt, source: 'manual' });
   room.game.lastPlayed = card;
   room.game.starProposal = null;
   emitGameLog(roomCode, 'game:card-played', {
@@ -517,7 +624,12 @@ function playCardInRoom(room: Room, roomCode: string, player: Player, card: numb
   });
 
   if (hasLowerCardInAnyHand) {
+    room.game.errorCounts[player.id] = (room.game.errorCounts[player.id] ?? 0) + 1;
     resolveErrorAndDiscard(room, card);
+    setInteractionLock(room, roomCode, 'error', ERROR_LOCK_MS, (latestRoom) => {
+      if (!latestRoom.game || latestRoom.game.phase !== 'playing') return;
+      scheduleCpuTurn(roomCode, 0);
+    });
     io.to(roomCode).emit('game:error-penalty', {
       playedCard: { value: card, playerId: player.id, playerName: player.name },
       blockingCards,
@@ -537,11 +649,12 @@ function playCardInRoom(room: Room, roomCode: string, player: Player, card: numb
   }
 
   if (room.game.lives <= 0) {
+    finalizeGameResults(room);
     room.game.phase = 'game-over';
     clearCpuTurn(roomCode);
     emitRoomUpdate(roomCode);
-    io.to(roomCode).emit('game:over', { reason: 'Sin vidas' });
-    emitGameLog(roomCode, 'game:over', { reason: 'Sin vidas' });
+    io.to(roomCode).emit('game:over', { reason: 'No lives left' });
+    emitGameLog(roomCode, 'game:over', { reason: 'No lives left' });
     return { ok: true };
   }
 
@@ -553,7 +666,7 @@ function playCardInRoom(room: Room, roomCode: string, player: Player, card: numb
   }
 
   emitRoomUpdate(roomCode);
-  scheduleCpuTurn(roomCode, hasLowerCardInAnyHand ? ERROR_OVERLAY_DELAY_MS : 0);
+  if (!hasLowerCardInAnyHand) scheduleCpuTurn(roomCode, 0);
   return { ok: true };
 }
 
@@ -561,7 +674,7 @@ function scheduleCpuTurn(roomCode: string, extraDelayMs = 0) {
   if (cpuPlayTimers.has(roomCode)) return;
 
   const room = rooms.get(roomCode);
-  if (!room?.game || room.game.mode !== 'dev-cpu' || room.game.phase !== 'playing' || room.game.starProposal) return;
+  if (!room?.game || room.game.mode !== 'dev-cpu' || room.game.phase !== 'playing' || room.game.starProposal || hasActiveInteractionLock(room)) return;
 
   const lowest = findGlobalLowestCard(room);
   if (!lowest?.player.isCpu) return;
@@ -574,7 +687,8 @@ function scheduleCpuTurn(roomCode: string, extraDelayMs = 0) {
       !latestRoom?.game ||
       latestRoom.game.mode !== 'dev-cpu' ||
       latestRoom.game.phase !== 'playing' ||
-      latestRoom.game.starProposal
+      latestRoom.game.starProposal ||
+      hasActiveInteractionLock(latestRoom)
     ) {
       return;
     }
@@ -612,47 +726,45 @@ function resolveStarIfEveryoneAccepted(room: Room, roomCode: string): boolean {
   if (!everyoneAccepted) return false;
 
   const initiatorId = room.game.starProposal.initiatorId;
-  const revealedPreview = Object.values(room.players)
-    .filter((player) => player.hand.length > 0)
-    .map((player) => ({ card: Math.min(...player.hand), playerId: player.id, playerName: player.name }))
-    .sort((a, b) => a.card - b.card);
-
   clearCpuTurn(roomCode);
-  resolveStar(room, roomCode);
+  const discarded = resolveStar(room, roomCode);
+  setInteractionLock(room, roomCode, 'star', STAR_RESOLUTION_LOCK_MS, (latestRoom) => {
+    if (!latestRoom.game || latestRoom.game.phase !== 'playing') return;
+    scheduleCpuTurn(roomCode, 0);
+  });
   io.to(roomCode).emit('game:star-used', {
-    message: 'Estrella usada. Se jugaron automáticamente las cartas más bajas.',
+    message: 'Star used. Lowest cards discarded.',
+    discarded,
   });
   emitGameLog(roomCode, 'game:star-used', {
     byPlayerId: initiatorId,
-    revealed: revealedPreview,
+    discarded,
   });
-  scheduleCpuTurn(roomCode, STAR_RESOLVED_CPU_DELAY_MS);
   return true;
 }
 
-function resolveStar(room: Room, roomCode: string) {
-  if (!room.game || room.game.stars <= 0) return;
+function resolveStar(room: Room, roomCode: string): StarDiscardPreview[] {
+  if (!room.game || room.game.stars <= 0) return [];
 
-  const revealed: Array<{ card: number; playerId: string }> = [];
-  Object.values(room.players).forEach((player) => {
-    if (player.hand.length === 0) return;
-    const lowest = Math.min(...player.hand);
-    player.hand = player.hand.filter((card) => card !== lowest);
-    revealed.push({ card: lowest, playerId: player.id });
-  });
-
-  revealed.sort((a, b) => a.card - b.card).forEach((entry) => {
-    room.game?.pile.push(entry.card);
-    room.game?.pileHistory.push({ value: entry.card, playerId: entry.playerId });
-    if (room.game) room.game.lastPlayed = entry.card;
-  });
+  const discarded = discardLowestCardPerPlayer(room.players);
 
   room.game.stars -= 1;
   room.game.starProposal = null;
 
+  discarded.forEach((entry) => {
+    emitGameLog(roomCode, 'game:discard', {
+      card: entry.card,
+      playerId: entry.playerId,
+      playerName: entry.playerName,
+      reason: 'star',
+    });
+  });
+
   if (countRemainingCards(room) === 0) {
     scheduleLevelCompletionAfterRoundOut(room, roomCode);
   }
+
+  return discarded;
 }
 
 function pickNextHost(room: Room, roomCode?: string) {
@@ -712,6 +824,7 @@ function removePlayerCompletely(playerId: string) {
   if (Object.keys(room.players).length === 0) {
     clearCpuTurn(roomCode);
     clearLevelCompleteTimer(roomCode);
+    clearInteractionLockTimer(roomCode);
     rooms.delete(roomCode);
     return;
   }
@@ -834,7 +947,7 @@ io.on('connection', (socket) => {
   socket.on('room:leave', (ack?: (response: unknown) => void) => {
     const ctx = getSocketContext(socket.id);
     if (!ctx) {
-      ack?.({ ok: false, error: 'No estás en una sala' });
+      ack?.({ ok: false, error: 'You are not in a room' });
       return;
     }
 
@@ -846,12 +959,27 @@ io.on('connection', (socket) => {
     ack?.({ ok: true });
   });
 
+  socket.on('room:resync', (ack?: (response: unknown) => void) => {
+    const ctx = getSocketContext(socket.id);
+    if (!ctx) {
+      ack?.({ ok: false, error: 'You are not in a room' });
+      return;
+    }
+
+    ack?.({
+      ok: true,
+      room: serializeRoom(ctx.room),
+      hand: [...ctx.player.hand].sort((a, b) => a - b),
+      syncedAt: Date.now(),
+    });
+  });
+
   socket.on('room:create', (payload: { playerName: string; playerId: string }, ack?: (response: unknown) => void) => {
     const playerName = payload?.playerName?.trim();
     const playerId = payload?.playerId?.trim();
 
     if (!playerName || !playerId || !isValidPlayerId(playerId)) {
-      ack?.({ ok: false, error: 'Nombre o identificador de jugador inválido' });
+        ack?.({ ok: false, error: 'Invalid player name or identifier' });
       return;
     }
 
@@ -901,7 +1029,7 @@ io.on('connection', (socket) => {
       const playerId = payload?.playerId?.trim();
 
       if (!requestedRoomCode || !playerName || !playerId || !isValidPlayerId(playerId)) {
-        ack?.({ ok: false, error: 'Código, nombre o identificador inválido' });
+        ack?.({ ok: false, error: 'Invalid room code, name, or identifier' });
         return;
       }
 
@@ -910,14 +1038,14 @@ io.on('connection', (socket) => {
       if (!room) {
         const cpuPlayers = parseCpuRoomCode(requestedRoomCode);
         if (!cpuPlayers) {
-          ack?.({ ok: false, error: 'La sala no existe' });
+          ack?.({ ok: false, error: 'That room does not exist' });
           return;
         }
 
         roomCode = createUniqueRoomCode();
         room = createCpuRoom(roomCode, cpuPlayers, requestedRoomCode);
       } else if (room.shareable === false && !room.players[playerId]) {
-        ack?.({ ok: false, error: 'Esta sala privada no se puede compartir' });
+        ack?.({ ok: false, error: 'This private room cannot be shared' });
         return;
       }
 
@@ -960,13 +1088,13 @@ io.on('connection', (socket) => {
       }
 
       if (room.status !== 'lobby') {
-        ack?.({ ok: false, error: 'La partida ya comenzó en esta sala' });
+        ack?.({ ok: false, error: 'The game already started in this room' });
         return;
       }
 
       const currentPlayers = Object.values(room.players);
       if (currentPlayers.length >= MAX_PLAYERS) {
-        ack?.({ ok: false, error: `Sala completa (máximo ${MAX_PLAYERS} jugadores)` });
+        ack?.({ ok: false, error: `Room is full (maximum ${MAX_PLAYERS} players)` });
         return;
       }
 
@@ -998,30 +1126,42 @@ io.on('connection', (socket) => {
   socket.on('player:ready', (payload: { ready: boolean }, ack?: (response: unknown) => void) => {
     const ctx = getSocketContext(socket.id);
     if (!ctx) {
-      ack?.({ ok: false, error: 'No estás en una sala' });
+      ack?.({ ok: false, error: 'You are not in a room' });
+      return;
+    }
+
+    if (ctx.room.game && hasActiveInteractionLock(ctx.room)) {
+      const reason = ctx.room.game.interactionLock?.reason;
+      const error =
+        reason === 'dealing'
+          ? 'Wait until dealing finishes'
+          : reason === 'level-complete'
+            ? 'Wait until the level clear message finishes'
+          : reason === 'countdown'
+            ? 'The countdown is already running'
+            : reason === 'star'
+              ? 'Wait until the star discard finishes'
+            : 'Wait until the current transition finishes';
+      ack?.({ ok: false, error });
       return;
     }
 
     ctx.player.ready = Boolean(payload?.ready);
     markCpuPlayersReady(ctx.room);
 
+      // Auto-start in the lobby when everyone is ready.
+    if (ctx.room.status === 'lobby' && !ctx.room.game && canStartGame(ctx.room)) {
+      startGameInRoom(ctx.room, ctx.roomCode);
+      ack?.({ ok: true, autoStarted: true });
+      return;
+    }
+
     if (
       ctx.room.game &&
       (ctx.room.game.phase === 'focus' || ctx.room.game.phase === 'paused') &&
       hasAllReadyForRound(ctx.room)
     ) {
-      ctx.room.game.phase = 'playing';
-      Object.values(ctx.room.players).forEach((player) => {
-        player.ready = false;
-      });
-      scheduleCpuTurn(ctx.roomCode, ROUND_COUNTDOWN_DELAY_MS);
-    }
-
-    // Auto-inicio en lobby cuando todos están listos.
-    if (ctx.room.status === 'lobby' && !ctx.room.game && canStartGame(ctx.room)) {
-      startGameInRoom(ctx.room, ctx.roomCode);
-      ack?.({ ok: true, autoStarted: true });
-      return;
+      beginRoundCountdown(ctx.room, ctx.roomCode);
     }
 
     emitRoomUpdate(ctx.roomCode);
@@ -1031,17 +1171,17 @@ io.on('connection', (socket) => {
   socket.on('game:start', (ack?: (response: unknown) => void) => {
     const ctx = getSocketContext(socket.id);
     if (!ctx) {
-      ack?.({ ok: false, error: 'No estás en una sala' });
+      ack?.({ ok: false, error: 'You are not in a room' });
       return;
     }
 
     if (ctx.room.hostId !== ctx.playerId) {
-      ack?.({ ok: false, error: 'Solo el host puede iniciar' });
+      ack?.({ ok: false, error: 'Only the host can start the game' });
       return;
     }
 
     if (!canStartGame(ctx.room)) {
-      ack?.({ ok: false, error: 'Todos deben estar listos (mínimo 2 jugadores)' });
+      ack?.({ ok: false, error: 'Everyone must be ready (minimum 2 players)' });
       return;
     }
 
@@ -1052,23 +1192,25 @@ io.on('connection', (socket) => {
   socket.on('game:retry', (ack?: (response: unknown) => void) => {
     const ctx = getSocketContext(socket.id);
     if (!ctx) {
-      ack?.({ ok: false, error: 'No estás en una sala' });
+      ack?.({ ok: false, error: 'You are not in a room' });
       return;
     }
 
     if (ctx.room.hostId !== ctx.playerId) {
-      ack?.({ ok: false, error: 'Solo el host puede reintentar' });
+      ack?.({ ok: false, error: 'Only the host can retry' });
       return;
     }
 
     if (!ctx.room.game) {
-      ack?.({ ok: false, error: 'No hay partida activa' });
+      ack?.({ ok: false, error: 'There is no active game' });
       return;
     }
 
     const playerCount = Object.values(ctx.room.players).length;
     const maxLevel = maxLevelByPlayers(playerCount);
+    const startedAt = Date.now();
     clearLevelCompleteTimer(ctx.roomCode);
+    clearInteractionLockTimer(ctx.roomCode);
     ctx.room.status = 'in-game';
     ctx.room.game = {
       phase: 'focus',
@@ -1082,12 +1224,17 @@ io.on('connection', (socket) => {
       rewardMap: buildRewardMap(maxLevel),
       mode: gameModeForRoom(ctx.room),
       starProposal: null,
+      interactionLock: null,
+      startedAt,
+      errorCounts: {},
+      finalResults: null,
     };
 
     dealLevel(ctx.room);
+    setInteractionLock(ctx.room, ctx.roomCode, 'dealing', Math.max(RESTART_BANNER_DELAY_MS, getDealLockDuration(ctx.room.game.currentLevel)));
     emitRoomUpdate(ctx.roomCode);
     io.to(ctx.roomCode).emit('game:restarted', {
-      message: 'Partida reiniciada en la misma sala.',
+      message: 'Game restarted in the same room.',
     });
     emitGameLog(ctx.roomCode, 'game:restarted', { byPlayerId: ctx.playerId, byPlayerName: ctx.player.name });
     ack?.({ ok: true });
@@ -1101,7 +1248,7 @@ io.on('connection', (socket) => {
       return;
     }
     if (!ctx) {
-      ack?.({ ok: false, error: 'No estás en una sala' });
+      ack?.({ ok: false, error: 'You are not in a room' });
       return;
     }
   });
@@ -1109,17 +1256,22 @@ io.on('connection', (socket) => {
   socket.on('game:pause-request', (ack?: (response: unknown) => void) => {
     const ctx = getSocketContext(socket.id);
     if (!ctx || !ctx.room.game) {
-      ack?.({ ok: false, error: 'Juego inválido' });
+      ack?.({ ok: false, error: 'Invalid game state' });
       return;
     }
 
     if (ctx.room.game.phase !== 'playing') {
-      ack?.({ ok: false, error: 'Solo puedes pausar durante juego activo' });
+      ack?.({ ok: false, error: 'You can only pause during active play' });
+      return;
+    }
+
+    if (hasActiveInteractionLock(ctx.room)) {
+      ack?.({ ok: false, error: 'Wait until the current transition finishes' });
       return;
     }
 
     if (!isActiveRoundParticipant(ctx.room, ctx.player)) {
-      ack?.({ ok: false, error: 'Ya terminaste tus cartas en esta ronda' });
+      ack?.({ ok: false, error: 'You already finished your cards this round' });
       return;
     }
 
@@ -1133,7 +1285,7 @@ io.on('connection', (socket) => {
     emitRoomUpdate(ctx.roomCode);
     io.to(ctx.roomCode).emit('game:paused', {
       by: ctx.playerId,
-      message: 'Pausa solicitada. Todos deben volver a listo para continuar.',
+      message: 'Pause requested. Everyone must ready up again to continue.',
     });
     emitGameLog(ctx.roomCode, 'game:paused', { byPlayerId: ctx.playerId, byPlayerName: ctx.player.name });
     ack?.({ ok: true });
@@ -1142,22 +1294,27 @@ io.on('connection', (socket) => {
   socket.on('star:propose', (ack?: (response: unknown) => void) => {
     const ctx = getSocketContext(socket.id);
     if (!ctx || !ctx.room.game) {
-      ack?.({ ok: false, error: 'Juego inválido' });
+      ack?.({ ok: false, error: 'Invalid game state' });
       return;
     }
 
     if (ctx.room.game.phase !== 'playing') {
-      ack?.({ ok: false, error: 'Solo puedes proponer estrella durante juego activo' });
+      ack?.({ ok: false, error: 'You can only propose a star during active play' });
+      return;
+    }
+
+    if (hasActiveInteractionLock(ctx.room)) {
+      ack?.({ ok: false, error: 'Wait until the current transition finishes' });
       return;
     }
 
     if (ctx.room.game.stars <= 0) {
-      ack?.({ ok: false, error: 'No quedan estrellas' });
+      ack?.({ ok: false, error: 'No stars left' });
       return;
     }
 
     if (!isActiveRoundParticipant(ctx.room, ctx.player)) {
-      ack?.({ ok: false, error: 'Ya terminaste tus cartas en esta ronda' });
+      ack?.({ ok: false, error: 'You already finished your cards this round' });
       return;
     }
 
@@ -1181,12 +1338,17 @@ io.on('connection', (socket) => {
   socket.on('star:accept', (ack?: (response: unknown) => void) => {
     const ctx = getSocketContext(socket.id);
     if (!ctx || !ctx.room.game || !ctx.room.game.starProposal) {
-      ack?.({ ok: false, error: 'No hay propuesta activa de estrella' });
+      ack?.({ ok: false, error: 'There is no active star proposal' });
       return;
     }
 
     if (ctx.room.game.phase !== 'playing') {
-      ack?.({ ok: false, error: 'Solo puedes aceptar estrella durante juego activo' });
+      ack?.({ ok: false, error: 'You can only accept a star during active play' });
+      return;
+    }
+
+    if (hasActiveInteractionLock(ctx.room)) {
+      ack?.({ ok: false, error: 'Wait until the current transition finishes' });
       return;
     }
 
@@ -1211,26 +1373,6 @@ io.on('connection', (socket) => {
       emitRoomUpdate(ctx.roomCode);
       ack?.({ ok: true });
       return;
-    }
-
-    const connectedPlayers = getActiveRoundParticipants(ctx.room).map((player) => player.id);
-
-    const everyoneAccepted = connectedPlayers.every((id) => ctx.room.game?.starProposal?.acceptedBy.has(id));
-    if (everyoneAccepted) {
-      const initiatorId = ctx.room.game.starProposal?.initiatorId ?? null;
-      const revealedPreview = Object.values(ctx.room.players)
-        .filter((player) => player.hand.length > 0)
-        .map((player) => ({ card: Math.min(...player.hand), playerId: player.id, playerName: player.name }))
-        .sort((a, b) => a.card - b.card);
-
-      resolveStar(ctx.room, ctx.roomCode);
-      io.to(ctx.roomCode).emit('game:star-used', {
-        message: 'Estrella usada. Se jugaron automáticamente las cartas más bajas.',
-      });
-      emitGameLog(ctx.roomCode, 'game:star-used', {
-        byPlayerId: initiatorId,
-        revealed: revealedPreview,
-      });
     }
 
     emitRoomUpdate(ctx.roomCode);
