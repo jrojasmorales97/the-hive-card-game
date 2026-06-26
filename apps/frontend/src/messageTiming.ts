@@ -10,7 +10,7 @@ const OVERLAY_DURATIONS_MS: Record<OverlayMessageKind, number> = {
   error: 5000,
   pause: 5000,
   'star-used': 5000,
-  'level-complete': 5000,
+  'level-complete': 3000,
   restarted: 5000,
 };
 

@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { Server } from 'socket.io';
 import { calculateFinalResults, type FinalPlayerResult } from './finalScoring.js';
+import { buildPrivateActions, type PrivateAction } from './privateState.js';
 import {
   ERROR_LOCK_MS,
   LEVEL_COMPLETE_LOCK_MS,
@@ -66,6 +67,7 @@ type Room = {
   players: Record<string, Player>;
   status: 'lobby' | 'in-game';
   game: GameState | null;
+  version: number;
   logs: Array<{
     id: string;
     ts: number;
@@ -189,17 +191,74 @@ function serializeRoom(room: Room) {
   };
 }
 
+function buildPrivateState(room: Room, player: Player): { hand: number[]; availableActions: PrivateAction[] } {
+  const lockReason = room.game?.interactionLock?.reason ?? null;
+  const interactionLocked = hasActiveInteractionLock(room);
+
+  return {
+    hand: [...player.hand].sort((a, b) => a - b),
+    availableActions: buildPrivateActions({
+      roomStatus: room.status,
+      phase: room.game?.phase ?? null,
+      isHost: room.hostId === player.id,
+      ready: player.ready,
+      handCount: player.hand.length,
+      connectedPlayerCount: Object.values(room.players).filter((entry) => entry.connected).length,
+      canStartGame: canStartGame(room),
+      interactionLocked,
+      interactionLockReason: lockReason,
+      stars: room.game?.stars ?? 0,
+      hasStarProposal: Boolean(room.game?.starProposal),
+      alreadyAcceptedStar: Boolean(room.game?.starProposal?.acceptedBy.has(player.id)),
+      isActiveRoundParticipant: isActiveRoundParticipant(room, player),
+      inRoundReadyWindow: Boolean(room.game && (room.game.phase === 'focus' || room.game.phase === 'paused')),
+      canRetry: Boolean(room.game && (room.game.phase === 'victory' || room.game.phase === 'game-over') && room.hostId === player.id),
+    }),
+  };
+}
+
+function createPublicRoomEnvelope(room: Room, serverTime = Date.now()) {
+  return {
+    version: room.version,
+    serverTime,
+    publicState: serializeRoom(room),
+  };
+}
+
+function createPrivateStateEnvelope(room: Room, player: Player, serverTime = Date.now()) {
+  return {
+    version: room.version,
+    serverTime,
+    privateState: buildPrivateState(room, player),
+  };
+}
+
+function createRoomSnapshot(room: Room, player: Player, serverTime = Date.now()) {
+  return {
+    version: room.version,
+    serverTime,
+    publicState: serializeRoom(room),
+    privateState: buildPrivateState(room, player),
+  };
+}
+
+function nextFunctionalVersion(room: Room): number {
+  return room.version + 1;
+}
+
 function emitRoomUpdate(code: string) {
   const room = rooms.get(code);
   if (!room) return;
 
-  io.to(code).emit('room:update', serializeRoom(room));
+  room.version += 1;
+  const serverTime = Date.now();
+
+  io.to(code).emit('room:update', createPublicRoomEnvelope(room, serverTime));
 
   Object.values(room.players).forEach((player) => {
     if (!player.socketId) return;
-    io.to(player.socketId).emit('player:state', {
-      hand: [...player.hand].sort((a, b) => a - b),
-    });
+    io.to(player.socketId).emit('player:state', createPrivateStateEnvelope(room, player, serverTime));
+    io.to(player.socketId).emit('room:snapshot', createRoomSnapshot(room, player, serverTime));
   });
 }
 
@@ -427,6 +486,7 @@ function startGameInRoom(room: Room, roomCode: string) {
   room.game.phase = 'focus';
   emitRoomUpdate(roomCode);
   io.to(roomCode).emit('game:started', {
+    version: room.version,
     startedAt,
     message: 'Game started. Get ready...',
   });
@@ -494,6 +554,7 @@ function completeLevelOrGame(room: Room, roomCode: string) {
   applyLevelReward(room);
 
   io.to(roomCode).emit('game:level-complete', {
+    version: nextFunctionalVersion(room),
     levelCompleted,
     reward,
     lives: room.game.lives,
@@ -531,7 +592,7 @@ function completeLevelOrGame(room: Room, roomCode: string) {
       if (hasAllReadyForRound(latestRoom)) beginRoundCountdown(latestRoom, roomCode);
     });
     emitRoomUpdate(roomCode);
-    io.to(roomCode).emit('game:next-level-ready', { level: latestRoom.game.currentLevel });
+    io.to(roomCode).emit('game:next-level-ready', { version: latestRoom.version, level: latestRoom.game.currentLevel });
     emitGameLog(roomCode, 'game:next-level-ready', { level: latestRoom.game.currentLevel });
   }, nextLevelDelayMs);
 }
@@ -631,6 +692,7 @@ function playCardInRoom(room: Room, roomCode: string, player: Player, card: numb
       scheduleCpuTurn(roomCode, 0);
     });
     io.to(roomCode).emit('game:error-penalty', {
+      version: nextFunctionalVersion(room),
       playedCard: { value: card, playerId: player.id, playerName: player.name },
       blockingCards,
       lifeLost: 1,
@@ -653,7 +715,7 @@ function playCardInRoom(room: Room, roomCode: string, player: Player, card: numb
     room.game.phase = 'game-over';
     clearCpuTurn(roomCode);
     emitRoomUpdate(roomCode);
-    io.to(roomCode).emit('game:over', { reason: 'No lives left' });
+    io.to(roomCode).emit('game:over', { version: room.version, reason: 'No lives left' });
     emitGameLog(roomCode, 'game:over', { reason: 'No lives left' });
     return { ok: true };
   }
@@ -733,6 +795,7 @@ function resolveStarIfEveryoneAccepted(room: Room, roomCode: string): boolean {
     scheduleCpuTurn(roomCode, 0);
   });
   io.to(roomCode).emit('game:star-used', {
+    version: nextFunctionalVersion(room),
     message: 'Star used. Lowest cards discarded.',
     discarded,
   });
@@ -917,6 +980,7 @@ function createCpuRoom(roomCode: string, cpuPlayers: number, displayCode = roomC
     status: 'lobby',
     players,
     game: null,
+    version: 0,
     logs: [],
   };
 
@@ -968,6 +1032,7 @@ io.on('connection', (socket) => {
 
     ack?.({
       ok: true,
+      snapshot: createRoomSnapshot(ctx.room, ctx.player),
       room: serializeRoom(ctx.room),
       hand: [...ctx.player.hand].sort((a, b) => a - b),
       syncedAt: Date.now(),
@@ -991,10 +1056,10 @@ io.on('connection', (socket) => {
     removePlayerCompletely(playerId);
 
     const roomCode = createUniqueRoomCode();
-    const room: Room = {
-      code: roomCode,
-      hostId: playerId,
-      status: 'lobby',
+     const room: Room = {
+       code: roomCode,
+       hostId: playerId,
+       status: 'lobby',
       players: {
         [playerId]: {
           id: playerId,
@@ -1004,18 +1069,19 @@ io.on('connection', (socket) => {
           ready: false,
           hand: [],
         },
-      },
-      game: null,
-      logs: [],
-    };
+       },
+       game: null,
+       version: 0,
+       logs: [],
+     };
 
     rooms.set(roomCode, room);
     bindSocketToPlayer(socket.id, playerId, roomCode);
     void socket.join(roomCode);
 
-    emitRoomUpdate(roomCode);
-    emitGameLog(roomCode, 'room:joined', { playerId, playerName });
-    ack?.({ ok: true, room: serializeRoom(room), yourId: playerId });
+     emitRoomUpdate(roomCode);
+     emitGameLog(roomCode, 'room:joined', { playerId, playerName });
+     ack?.({ ok: true, snapshot: createRoomSnapshot(room, room.players[playerId]), room: serializeRoom(room), hand: [], yourId: playerId });
   });
 
   socket.on(
@@ -1083,7 +1149,14 @@ io.on('connection', (socket) => {
 
         emitRoomUpdate(roomCode);
         emitGameLog(roomCode, 'room:reconnected', { playerId, playerName });
-        ack?.({ ok: true, room: serializeRoom(room), yourId: playerId, reconnected: true });
+        ack?.({
+          ok: true,
+          snapshot: createRoomSnapshot(room, existingPlayer),
+          room: serializeRoom(room),
+          hand: [...existingPlayer.hand].sort((a, b) => a - b),
+          yourId: playerId,
+          reconnected: true,
+        });
         return;
       }
 
@@ -1119,7 +1192,14 @@ io.on('connection', (socket) => {
 
       emitRoomUpdate(roomCode);
       emitGameLog(roomCode, 'room:joined', { playerId, playerName });
-      ack?.({ ok: true, room: serializeRoom(room), yourId: playerId, reconnected: false });
+      ack?.({
+        ok: true,
+        snapshot: createRoomSnapshot(room, room.players[playerId]),
+        room: serializeRoom(room),
+        hand: [],
+        yourId: playerId,
+        reconnected: false,
+      });
     },
   );
 
@@ -1234,6 +1314,7 @@ io.on('connection', (socket) => {
     setInteractionLock(ctx.room, ctx.roomCode, 'dealing', Math.max(RESTART_BANNER_DELAY_MS, getDealLockDuration(ctx.room.game.currentLevel)));
     emitRoomUpdate(ctx.roomCode);
     io.to(ctx.roomCode).emit('game:restarted', {
+      version: ctx.room.version,
       message: 'Game restarted in the same room.',
     });
     emitGameLog(ctx.roomCode, 'game:restarted', { byPlayerId: ctx.playerId, byPlayerName: ctx.player.name });
@@ -1284,6 +1365,7 @@ io.on('connection', (socket) => {
 
     emitRoomUpdate(ctx.roomCode);
     io.to(ctx.roomCode).emit('game:paused', {
+      version: ctx.room.version,
       by: ctx.playerId,
       message: 'Pause requested. Everyone must ready up again to continue.',
     });

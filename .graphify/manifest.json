@@ -8,20 +8,20 @@
     "hash": "d6b9f85b81214876444cabccec831fc2"
   },
   "apps/backend/src/gameTiming.test.ts": {
-    "mtime": 1782312633138.1177,
-    "hash": "8fa38bc7edf8de30f0b134f96e40194b"
+    "mtime": 1782455681489.568,
+    "hash": "03874e8fbcc21d2b94cc5b028b4c7659"
   },
   "apps/backend/src/gameTiming.ts": {
-    "mtime": 1782312633137.1177,
-    "hash": "c397e828f6baf404f2d49197cccf29ec"
+    "mtime": 1782455681472.568,
+    "hash": "407aceeecdb54516f6f4c57eddfaaf8b"
   },
   "apps/backend/src/index.ts": {
-    "mtime": 1782456547594.1326,
-    "hash": "72488721cb1f0af14522f687b5397c93"
+    "mtime": 1782460450476.9536,
+    "hash": "485455f54e06fafdfe334030e729686e"
   },
   "apps/frontend/src/App.tsx": {
-    "mtime": 1782456623249.8423,
-    "hash": "c6f734b88f02a857cc40c55b3c650180"
+    "mtime": 1782460771241.0703,
+    "hash": "933429c21814c399ccad6333a88f6ec5"
   },
   "apps/frontend/src/connectionStatus.test.ts": {
     "mtime": 1782315465744.5913,
@@ -32,12 +32,12 @@
     "hash": "8af0af788788f4a111cbac70884ecaff"
   },
   "apps/frontend/src/gameUi.test.ts": {
-    "mtime": 1782312747674.4539,
-    "hash": "803171cf92cd415141d4c09cd36750f6"
+    "mtime": 1782455681505.568,
+    "hash": "31b68ddd47329ce6486986534ac0a058"
   },
   "apps/frontend/src/gameUi.ts": {
-    "mtime": 1782312747673.4539,
-    "hash": "1e04742d5d82489281081e918c17da93"
+    "mtime": 1782455681505.568,
+    "hash": "0af63d34fbbe457c94c6c6b0c45b30eb"
   },
   "apps/frontend/src/main.tsx": {
     "mtime": 1782229866468.8901,
@@ -250,5 +250,97 @@
   ".playwright-mcp/star-overlay-cpu-paused.png": {
     "mtime": 1782229866462.6697,
     "hash": "3942272493a6abe9c11074cca95b50c8"
+  },
+  "apps/backend/src/levelFlow.test.ts": {
+    "mtime": 1782456547576.947,
+    "hash": "ad50954586b8035f6099831ffc801389"
+  },
+  "apps/backend/src/levelFlow.ts": {
+    "mtime": 1782456547575.947,
+    "hash": "3af3990221b5a8914952c68ca8963098"
+  },
+  "apps/frontend/src/finalScoreUi.test.ts": {
+    "mtime": 1782406215314.2734,
+    "hash": "873d406aa8f35e2732b015bfdf4cfe17"
+  },
+  "apps/frontend/src/finalScoreUi.ts": {
+    "mtime": 1782406215313.2737,
+    "hash": "b0441c02c53d8603a48393b69c632fce"
+  },
+  "apps/frontend/src/levelFlow.test.ts": {
+    "mtime": 1782456547565.9473,
+    "hash": "b13681e6e5b7792ade2aca921dbc9482"
+  },
+  "apps/frontend/src/levelFlow.ts": {
+    "mtime": 1782456547563.9473,
+    "hash": "a761055f0e15e30c6463061f30d72625"
+  },
+  "apps/frontend/src/messageTiming.test.ts": {
+    "mtime": 1782455681470.527,
+    "hash": "9786a47a9d5ccad503b4f7b22a871fa3"
+  },
+  "apps/frontend/src/messageTiming.ts": {
+    "mtime": 1782455681455.5679,
+    "hash": "ef880040b655e9035bd9156b22baacf2"
+  },
+  "apps/frontend/src/starUi.test.ts": {
+    "mtime": 1782452288661.1821,
+    "hash": "716cc2dbc5ba5229e6b8e8d9dab389eb"
+  },
+  "apps/frontend/src/starUi.ts": {
+    "mtime": 1782452288649.1824,
+    "hash": "4e6e0047ee2030ce7ee39d796c39b0bc"
+  },
+  ".graphify/GRAPH_REPORT.md": {
+    "mtime": 1782456657488.8044,
+    "hash": "b8c6fd1340c1881767a69cfe4be50b05"
+  },
+  ".graphify/scratch/assistant-extract-instructions.md": {
+    "mtime": 1782375530927.3008,
+    "hash": "bb226afcb9530474d4376ada9e86f9c1"
+  },
+  ".serena/memories/memory_maintenance.md": {
+    "mtime": 1782292304754.3762,
+    "hash": "5a2422d8355cb91f16402415a54e3c66"
+  },
+  ".serena/project.yml": {
+    "mtime": 1782292294714.433,
+    "hash": "080d57742c4a9a7b8635fbdbb322007c"
+  },
+  "architecture.md": {
+    "mtime": 1782404822549.7878,
+    "hash": "dffdbb3677acdf4ad15b1ac6043eecea"
+  },
+  "business.md": {
+    "mtime": 1782404822548.7878,
+    "hash": "0541acf2dbfcc020bd5d2caaa8e1a430"
+  },
+  "plans/2026-06-25/plan_estrella-descarta-cartas.md": {
+    "mtime": 1782404412659.0486,
+    "hash": "c7d55cc4fc5c989be8c3aa2bb10687c1"
+  },
+  "plans/2026-06-25/plan_estrella-x-descartes.md": {
+    "mtime": 1782407968079.1013,
+    "hash": "d127e19581ff0eb7006add4aab89e77b"
+  },
+  "plans/2026-06-25/plan_podio-final-partida.md": {
+    "mtime": 1782405381004.3481,
+    "hash": "8af616282c9fbe67666d07bc8cdb494f"
+  },
+  "plans/2026-06-25/plan_tiempos-mensajes.md": {
+    "mtime": 1782406802368.8926,
+    "hash": "8fb5526486c717608ba26e9b8432e120"
+  },
+  "plans/2026-06-26/plan_estrella-overlay-compacto.md": {
+    "mtime": 1782452926892.909,
+    "hash": "ac46e1345affd20cd20581f810fa9f91"
+  },
+  "plans/2026-06-26/plan_mensajes-bloqueantes-secuenciales.md": {
+    "mtime": 1782454306022.43,
+    "hash": "46f3f0cb26a9c3cfd99e494ecdda3c39"
+  },
+  "plans/2026-06-26/plan_sincronizacion-level-complete.md": {
+    "mtime": 1782456292777.5771,
+    "hash": "6825092bed9b13fc27354ec7ee22ab2f"
   }
 }

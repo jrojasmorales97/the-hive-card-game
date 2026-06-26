@@ -3,14 +3,14 @@
   "branchName": "main",
   "worktreePath": "/home/jromo/Projects/the-hive-card-game",
   "upstream": "origin/main",
-  "mergeBase": "9d3c17b52d95e76f2dba7536d4eb355de8be852a",
+  "mergeBase": "b33fd54ff642a4f37c08fb11ae7e57c90d5479f2",
   "firstSeenHead": "9d3c17b52d95e76f2dba7536d4eb355de8be852a",
-  "lastSeenHead": "9d3c17b52d95e76f2dba7536d4eb355de8be852a",
-  "lastAnalyzedHead": "9d3c17b52d95e76f2dba7536d4eb355de8be852a",
+  "lastSeenHead": "b33fd54ff642a4f37c08fb11ae7e57c90d5479f2",
+  "lastAnalyzedHead": "b33fd54ff642a4f37c08fb11ae7e57c90d5479f2",
   "stale": false,
   "staleReason": null,
   "staleSince": null,
   "lifecycleEvent": null,
   "createdAt": "2026-06-25T08:09:00.917Z",
-  "updatedAt": "2026-06-26T06:50:57.521Z"
+  "updatedAt": "2026-06-26T08:00:28.902Z"
 }

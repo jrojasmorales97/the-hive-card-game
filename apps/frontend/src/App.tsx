@@ -1,21 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 // useLayoutEffect alias - avoids SSR warnings while being semantically clear
 import { io, Socket } from 'socket.io-client';
-import {
-  connectionIcon,
-  connectionLabel,
-  deriveConnectionState,
-  RESYNC_INTERVAL_MS,
-  RESYNC_TIMEOUT_MS,
-  type ConnectionState,
-} from './connectionStatus.js';
+import { deriveConnectionState, RESYNC_INTERVAL_MS, RESYNC_TIMEOUT_MS, type ConnectionState } from './connectionStatus.js';
 import {
   countdownValueFromRemaining,
   isCountdownLockActive,
   isHandDealInProgress,
   isInteractionLockActive,
-  isReadyLocked,
 } from './gameUi.js';
+import {
+  applyPrivateFragment,
+  applyPrivateSnapshot,
+  applyPublicFragment,
+  createSnapshotCorrelationState,
+  estimateServerClockOffset,
+  estimateServerNow,
+  shouldApplyDecorativeEvent,
+} from './roomSync.js';
 import {
   findMyStarDiscard,
   mergeHandWithStarDiscard,
@@ -74,6 +75,27 @@ type RoomState = {
   } | null;
 };
 
+type ActionType = 'ready' | 'unready' | 'start' | 'play_card' | 'pause' | 'propose_star' | 'accept_star' | 'retry';
+
+type AvailableAction = {
+  type: ActionType;
+  visible: boolean;
+  enabled: boolean;
+  reason?: string;
+};
+
+type PrivatePlayerState = {
+  hand: number[];
+  availableActions: AvailableAction[];
+};
+
+type RoomSnapshot = {
+  version: number;
+  serverTime: number;
+  publicState: RoomState;
+  privateState: PrivatePlayerState;
+};
+
 type FinalPlayerResult = {
   playerId: string;
   playerName: string;
@@ -95,6 +117,7 @@ type PileCard = {
 type LevelReward = 'life' | 'star' | null;
 
 type EventOverlay = {
+  kind?: 'error' | 'pause' | 'star-used' | 'level-complete' | 'restarted';
   title: string;
   message: string;
   tone: 'info' | 'good' | 'warn' | 'error';
@@ -593,6 +616,7 @@ export function App() {
   const [accessTab, setAccessTab] = useState<'create' | 'join'>('join');
   const [room, setRoom] = useState<RoomState | null>(null);
   const [hand, setHand] = useState<number[]>([]);
+  const [availableActions, setAvailableActions] = useState<AvailableAction[]>([]);
   const [error, setError] = useState<string>('');
   const [info, setInfo] = useState<string>('');
   const [eventOverlay, setEventOverlay] = useState<EventOverlay | null>(null);
@@ -619,6 +643,7 @@ export function App() {
   const manualAccessRef = useRef(false);
   const skipNextAutoJoinRef = useRef(false);
   const reconnectingRef = useRef(false);
+  const socketConnectedRef = useRef(false);
   const syncInFlightRef = useRef(false);
   const syncHealthyRef = useRef(false);
   const resyncIntervalRef = useRef<number | null>(null);
@@ -626,6 +651,8 @@ export function App() {
   const logScrollRef = useRef<HTMLDivElement | null>(null);
   const logStickToBottomRef = useRef(true);
   const previousLogRoomCodeRef = useRef<string | null>(null);
+  const serverClockOffsetRef = useRef(0);
+  const snapshotCorrelationRef = useRef(createSnapshotCorrelationState<RoomState, PrivatePlayerState>());
   const prevPileCountRef = useRef(0);
   const previousResourceRef = useRef<{ lives: number | null; stars: number | null; level: number | null }>({
     lives: null,
@@ -650,6 +677,73 @@ export function App() {
       }
       playerCornerRefs.current.delete(playerIdForRef);
     };
+  }
+
+  function actionFor(type: ActionType): AvailableAction | undefined {
+    return availableActions.find((action) => action.type === type);
+  }
+
+  function getEstimatedServerNow(): number {
+    return estimateServerNow(serverClockOffsetRef.current);
+  }
+
+  function applyClockSample(serverTime: number, clientSentAt?: number) {
+    if (typeof clientSentAt !== 'number') return;
+    serverClockOffsetRef.current = estimateServerClockOffset({
+      clientSentAt,
+      clientReceivedAt: Date.now(),
+      serverTime,
+    });
+  }
+
+  function commitAppliedSnapshot(snapshot: RoomSnapshot, opts?: { forceRevealHand?: boolean; clientSentAt?: number }) {
+    applyClockSample(snapshot.serverTime, opts?.clientSentAt);
+    setRoom(snapshot.publicState);
+    setHand(snapshot.privateState.hand ?? []);
+    setAvailableActions(snapshot.privateState.availableActions ?? []);
+
+    if (opts?.forceRevealHand) {
+      if (dealIntervalRef.current) {
+        window.clearInterval(dealIntervalRef.current);
+        dealIntervalRef.current = null;
+      }
+
+      setDealtHandCount(snapshot.privateState.hand.length);
+      previousHandKeyRef.current = snapshot.privateState.hand.join(',');
+      previousHandPhaseRef.current = snapshot.publicState.game?.phase ?? null;
+    }
+
+    syncHealthyRef.current = true;
+    syncInFlightRef.current = false;
+    clearResyncTimeout();
+    refreshConnectionState(socketConnectedRef.current, Boolean(snapshot.publicState ?? roomRef.current));
+    return true;
+  }
+
+  function applyAuthoritativeSnapshot(snapshot: RoomSnapshot, opts?: { forceRevealHand?: boolean; clientSentAt?: number }) {
+    const result = applyPrivateSnapshot(snapshotCorrelationRef.current, snapshot);
+    snapshotCorrelationRef.current = result.state;
+    if (!result.applied) return false;
+
+    return commitAppliedSnapshot(result.applied, opts);
+  }
+
+  function applyCorrelatedSnapshot(snapshot: RoomSnapshot) {
+    return commitAppliedSnapshot(snapshot);
+  }
+
+  function applyPublicStateFragment(fragment: { version: number; serverTime: number; publicState: RoomState }) {
+    const result = applyPublicFragment(snapshotCorrelationRef.current, fragment);
+    snapshotCorrelationRef.current = result.state;
+    if (!result.applied) return;
+    void applyCorrelatedSnapshot(result.applied);
+  }
+
+  function applyPrivateStateFragment(fragment: { version: number; serverTime: number; privateState: PrivatePlayerState }) {
+    const result = applyPrivateFragment(snapshotCorrelationRef.current, fragment);
+    snapshotCorrelationRef.current = result.state;
+    if (!result.applied) return;
+    void applyCorrelatedSnapshot(result.applied);
   }
 
   useEffect(() => {
@@ -696,10 +790,11 @@ export function App() {
         activeLock?.reason === 'level-complete' ? Math.max(0, activeLock.until - Date.now()) : 0;
 
       showEventOverlay(
-        {
-          title: `LEVEL ${payload.levelCompleted} CLEARED`,
-          message: overlaySubtitle('level-complete'),
-          tone: 'good',
+          {
+            kind: 'level-complete',
+            title: `LEVEL ${payload.levelCompleted} CLEARED`,
+            message: overlaySubtitle('level-complete'),
+            tone: 'good',
           reward: payload.reward ?? null,
         },
         Math.max(overlayDurationMs('level-complete'), remainingLockMs),
@@ -807,28 +902,6 @@ export function App() {
     });
     setSocket(s);
 
-    const markSynced = (nextRoom?: RoomState | null, nextHand?: number[], opts?: { forceRevealHand?: boolean }) => {
-      if (nextRoom) setRoom(nextRoom);
-      if (typeof nextHand !== 'undefined') {
-        setHand(nextHand);
-
-        if (opts?.forceRevealHand) {
-          if (dealIntervalRef.current) {
-            window.clearInterval(dealIntervalRef.current);
-            dealIntervalRef.current = null;
-          }
-
-          setDealtHandCount(nextHand.length);
-          previousHandKeyRef.current = nextHand.join(',');
-          previousHandPhaseRef.current = nextRoom?.game?.phase ?? roomRef.current?.game?.phase ?? null;
-        }
-      }
-      syncHealthyRef.current = true;
-      syncInFlightRef.current = false;
-      clearResyncTimeout();
-      refreshConnectionState(Boolean(s.connected), Boolean(nextRoom ?? roomRef.current));
-    };
-
     const performResync = (opts?: { forceUiSyncing?: boolean }) => {
       const targetRoom = roomRef.current?.code ?? (localStorage.getItem(STORAGE_KEYS.lastRoomCode) ?? '').trim().toUpperCase();
       const targetName = playerNameRef.current.trim() || (localStorage.getItem(STORAGE_KEYS.playerName) ?? '').trim();
@@ -849,6 +922,7 @@ export function App() {
         refreshConnectionState(Boolean(s.connected), true);
       }, RESYNC_TIMEOUT_MS);
 
+      const joinSentAt = Date.now();
       s.emit('room:join', { roomCode: targetRoom, playerName: targetName, playerId }, (response: any) => {
         if (!response?.ok) {
           syncInFlightRef.current = false;
@@ -860,9 +934,10 @@ export function App() {
           return;
         }
 
-        if (response.room) markSynced(response.room);
+        if (response.snapshot) applyAuthoritativeSnapshot(response.snapshot, { clientSentAt: joinSentAt });
         setInfo(response.reconnected ? 'Reconnected to room.' : 'Session restored.');
 
+        const resyncSentAt = Date.now();
         s.emit('room:resync', (syncResponse: any) => {
           if (!syncResponse?.ok) {
             syncHealthyRef.current = false;
@@ -872,12 +947,15 @@ export function App() {
             return;
           }
 
-          markSynced(syncResponse.room, syncResponse.hand ?? [], { forceRevealHand: true });
+          if (syncResponse.snapshot) {
+            applyAuthoritativeSnapshot(syncResponse.snapshot, { forceRevealHand: true, clientSentAt: resyncSentAt });
+          }
         });
       });
     };
 
     s.on('connect', () => {
+      socketConnectedRef.current = true;
       reconnectingRef.current = false;
       setError('');
 
@@ -897,6 +975,7 @@ export function App() {
     });
 
     s.on('disconnect', () => {
+      socketConnectedRef.current = false;
       reconnectingRef.current = false;
       syncInFlightRef.current = false;
       syncHealthyRef.current = false;
@@ -906,21 +985,29 @@ export function App() {
     });
 
     s.on('reconnect_attempt', () => {
+      socketConnectedRef.current = false;
       reconnectingRef.current = true;
       syncHealthyRef.current = false;
       refreshConnectionState(false);
     });
 
     s.on('connect_error', () => {
+      socketConnectedRef.current = false;
       reconnectingRef.current = true;
       syncHealthyRef.current = false;
       refreshConnectionState(false);
     });
 
-    s.on('room:update', (updatedRoom: RoomState) => {
-      markSynced(updatedRoom);
-      if (Array.isArray(updatedRoom.logs)) {
-        setGameLog(updatedRoom.logs.slice(-50));
+    s.on('room:snapshot', (snapshot: RoomSnapshot) => {
+      if (applyAuthoritativeSnapshot(snapshot) && Array.isArray(snapshot.publicState.logs)) {
+        setGameLog(snapshot.publicState.logs.slice(-50));
+      }
+    });
+
+    s.on('room:update', (payload: { version: number; serverTime: number; publicState: RoomState }) => {
+      applyPublicStateFragment(payload);
+      if (Array.isArray(payload.publicState.logs)) {
+        setGameLog(payload.publicState.logs.slice(-50));
       }
     });
 
@@ -928,18 +1015,21 @@ export function App() {
       pushLog(entry);
     });
 
-    s.on('player:state', (payload: { hand: number[] }) => {
-      markSynced(undefined, payload?.hand ?? []);
+    s.on('player:state', (payload: { version: number; serverTime: number; privateState: PrivatePlayerState }) => {
+      applyPrivateStateFragment(payload);
     });
 
     s.on(
       'game:error-penalty',
       (payload: {
+        version?: number;
         playedCard: { value: number; playerId: string; playerName: string };
         blockingCards: Array<{ value: number; playerId: string; playerName: string }>;
       }) => {
+        if (!shouldApplyDecorativeEvent(payload?.version, snapshotCorrelationRef.current.lastAppliedVersion)) return;
         showEventOverlay(
           {
+            kind: 'error',
             title: 'ERROR',
             message: overlaySubtitle('error'),
             tone: 'error',
@@ -950,11 +1040,13 @@ export function App() {
       },
     );
 
-    s.on('game:paused', (payload: { message?: string }) => {
+    s.on('game:paused', (payload: { version?: number; message?: string }) => {
+      if (!shouldApplyDecorativeEvent(payload?.version, snapshotCorrelationRef.current.lastAppliedVersion)) return;
       const msg = payload?.message ?? pickMessage(MSG.paused, Date.now());
       setInfo(msg);
       showEventOverlay(
         {
+          kind: 'pause',
           title: 'PAUSE REQUESTED',
           message: overlaySubtitle('pause'),
           tone: 'warn',
@@ -963,11 +1055,13 @@ export function App() {
       );
     });
 
-    s.on('game:star-used', (payload: StarUsedPayload) => {
+    s.on('game:star-used', (payload: StarUsedPayload & { version?: number }) => {
+      if (!shouldApplyDecorativeEvent(payload?.version, snapshotCorrelationRef.current.lastAppliedVersion)) return;
       const msg = payload?.message ?? pickMessage(MSG.starUsed, Date.now());
       setInfo(msg);
       showEventOverlay(
         {
+          kind: 'star-used',
           title: 'STAR RESOLVED',
           message: overlaySubtitle('star-used'),
           tone: 'good',
@@ -976,19 +1070,23 @@ export function App() {
         overlayDurationMs('star-used'),
       );
     });
-    s.on('game:level-complete', (payload: { levelCompleted: number; reward: LevelReward }) => {
+    s.on('game:level-complete', (payload: { version?: number; levelCompleted: number; reward: LevelReward }) => {
+      if (!shouldApplyDecorativeEvent(payload?.version, snapshotCorrelationRef.current.lastAppliedVersion)) return;
       scheduleLevelCompleteOverlay(payload);
     });
 
-    s.on('game:next-level-ready', () => {
+    s.on('game:next-level-ready', (payload: { version?: number }) => {
+      if (!shouldApplyDecorativeEvent(payload?.version, snapshotCorrelationRef.current.lastAppliedVersion)) return;
       setInfo('New hand dealt. Ready up when the table settles.');
     });
 
-    s.on('game:restarted', (payload: { message?: string }) => {
+    s.on('game:restarted', (payload: { version?: number; message?: string }) => {
+      if (!shouldApplyDecorativeEvent(payload?.version, snapshotCorrelationRef.current.lastAppliedVersion)) return;
       const msg = payload?.message ?? 'Game restarted in the same room.';
       setInfo(msg);
       showEventOverlay(
         {
+          kind: 'restarted',
           title: 'GAME RESTARTED',
           message: overlaySubtitle('restarted'),
           tone: 'info',
@@ -997,7 +1095,8 @@ export function App() {
       );
     });
 
-    s.on('game:over', () => {
+    s.on('game:over', (payload: { version?: number }) => {
+      if (!shouldApplyDecorativeEvent(payload?.version, snapshotCorrelationRef.current.lastAppliedVersion)) return;
       setEventOverlay(null);
       eventOverlayEndsAtRef.current = null;
       const msg = pickMessage(MSG.defeat, Date.now());
@@ -1017,6 +1116,7 @@ export function App() {
         refreshConnectionState(Boolean(s.connected), true);
       }, RESYNC_TIMEOUT_MS);
 
+      const resyncSentAt = Date.now();
       s.emit('room:resync', (response: any) => {
         if (!response?.ok) {
           syncInFlightRef.current = false;
@@ -1026,7 +1126,9 @@ export function App() {
           return;
         }
 
-        markSynced(response.room, response.hand ?? [], { forceRevealHand: true });
+        if (response.snapshot) {
+          applyAuthoritativeSnapshot(response.snapshot, { forceRevealHand: true, clientSentAt: resyncSentAt });
+        }
       });
     }, RESYNC_INTERVAL_MS);
 
@@ -1055,13 +1157,13 @@ export function App() {
     const countdownLock = lock!;
 
     const refreshCountdown = () => {
-      setCountdown(countdownValueFromRemaining(countdownLock.until - Date.now()));
+      setCountdown(countdownValueFromRemaining(countdownLock.until - getEstimatedServerNow()));
     };
 
     refreshCountdown();
 
     [countdownLock.until - 2000, countdownLock.until - 1000, countdownLock.until].forEach((target) => {
-      const delay = target - Date.now();
+      const delay = target - getEstimatedServerNow();
       if (delay > 0) countdownTimeoutsRef.current.push(window.setTimeout(refreshCountdown, delay));
     });
 
@@ -1273,24 +1375,23 @@ export function App() {
 
   const isHost = room?.hostId === playerId;
   const isPlaying = game?.phase === 'playing';
-  const isFocusOrPaused = game?.phase === 'focus' || game?.phase === 'paused';
-  const canReadyForRound = !!room && room.status === 'in-game' && isFocusOrPaused;
   const hasStarProposal = !!game?.starProposal;
   const alreadyAcceptedStar = !!game?.starProposal?.acceptedBy.includes(playerId);
   const activeInteractionLock = game && isInteractionLockActive(game.interactionLock) ? game.interactionLock : null;
 
-  const canStart =
-    !!room &&
-    room.status === 'lobby' &&
-    room.players.length >= 2 &&
-    room.players.every((player) => player.connected && player.ready) &&
-    isHost;
   const minPlayableCard = hand.length > 0 ? Math.min(...hand) : null;
   const isMeRoundOut = !!me && isPlayerRoundOut(me, cardsRemainingForPlayer(me));
   const isMeRoundReturning = !!me && isPlayerRoundReturning(me, cardsRemainingForPlayer(me));
   const isDealingHand = isHandDealInProgress(activeInteractionLock, hand.length, dealtHandCount);
   const interactionBlocked = Boolean(activeInteractionLock) || isDealingHand;
-  const readyBlocked = isReadyLocked(activeInteractionLock);
+  const readyAction = actionFor('ready');
+  const unreadyAction = actionFor('unready');
+  const startAction = actionFor('start');
+  const playCardAction = actionFor('play_card');
+  const pauseAction = actionFor('pause');
+  const proposeStarAction = actionFor('propose_star');
+  const acceptStarAction = actionFor('accept_star');
+  const readyOverlayBlocked = eventOverlay?.kind === 'level-complete' || eventOverlay?.kind === 'pause';
   const prepLabel =
     activeInteractionLock?.reason === 'dealing'
       ? 'The hive is dealing the next pulse'
@@ -1305,18 +1406,25 @@ export function App() {
         : countdown === 'play'
           ? 'The hive is releasing the swarm'
           : `The hive wakes in ${countdown}`;
-  const showReady = !me?.ready && ((room?.status === 'lobby' && (room?.players.length ?? 0) >= 2) || canReadyForRound);
-  const showNotReady = Boolean(me?.ready) && (room?.status === 'lobby' || canReadyForRound);
-  const showStart = room?.status === 'lobby' && canStart;
-  const overlayBlocking = countdown !== null;
-  const showPause = isPlaying && !isMeRoundOut && !interactionBlocked;
-  const showProposeStar = isPlaying && !isMeRoundOut && (game?.stars ?? 0) > 0 && !hasStarProposal && !interactionBlocked;
-  const showAcceptStar = isPlaying && !isMeRoundOut && hasStarProposal && !alreadyAcceptedStar && !interactionBlocked;
+  const showReady = Boolean(readyAction?.visible);
+  const showNotReady = Boolean(unreadyAction?.visible);
+  const showStart = Boolean(startAction?.visible);
+  const showPause = Boolean(pauseAction?.visible);
+  const showProposeStar = Boolean(proposeStarAction?.visible);
+  const showAcceptStar = Boolean(acceptStarAction?.visible);
+  const showRoundClearingPlaceholder = Boolean(game && (game.phase === 'playing' || game.phase === 'paused') && isMeRoundOut);
   const showHivePlaceholder = Boolean(
     game && (game.phase === 'focus' || activeInteractionLock?.reason === 'dealing' || isCountdownLockActive(activeInteractionLock)),
   );
+  const placeholderLabel = showRoundClearingPlaceholder ? 'The hive is still clearing' : prepLabel;
   const showHivePlaceholderAction =
-    showHivePlaceholder && !showReady && !showNotReady && !showStart && !showPause && !showProposeStar && !showAcceptStar;
+    (showHivePlaceholder || showRoundClearingPlaceholder) &&
+    !showReady &&
+    !showNotReady &&
+    !showStart &&
+    !showPause &&
+    !showProposeStar &&
+    !showAcceptStar;
   const currentReward = game ? rewardLabel(game.currentLevel) : 'No reward';
   const currentRewardType = game ? REWARDS[game.currentLevel] ?? null : null;
   const visibleHandCount = myStarDiscardedCard !== null ? displayHand.length : dealtHandCount;
@@ -1345,20 +1453,34 @@ export function App() {
   const isStarDiscardCard = (card: number | null) => card !== null && myStarDiscardedCard !== null && card === myStarDiscardedCard;
   const baseCommandActions = [
     showProposeStar
-      ? { key: 'star', label: 'Activate star', icon: 'star', className: 'command-button star', onClick: proposeStar, disabled: false }
+      ? {
+          key: 'star',
+          label: 'Propose star',
+          icon: 'star',
+          className: 'command-button star',
+          onClick: proposeStar,
+          disabled: !proposeStarAction?.enabled,
+        }
       : null,
     showPause
       ? {
           key: 'pause',
           label: 'Pause',
           icon: 'pause',
-          className: `command-button secondary${(game?.stars ?? 0) <= 0 || hasStarProposal ? ' full-span' : ''}`,
+          className: `command-button secondary${showProposeStar ? '' : ' full-span'}`,
           onClick: requestPause,
-          disabled: false,
+          disabled: !pauseAction?.enabled,
         }
       : null,
     showAcceptStar
-      ? { key: 'accept-star', label: 'Accept activation', icon: 'handshake', className: 'command-button pulse', onClick: acceptStar, disabled: false }
+      ? {
+          key: 'accept-star',
+          label: 'Accept activation',
+          icon: 'handshake',
+          className: 'command-button pulse',
+          onClick: acceptStar,
+          disabled: !acceptStarAction?.enabled,
+        }
       : hasStarProposal && alreadyAcceptedStar && !interactionBlocked
         ? {
             key: 'star-waiting',
@@ -1370,16 +1492,30 @@ export function App() {
           }
       : null,
     showStart
-      ? { key: 'start', label: 'Start', icon: 'play_arrow', className: 'command-button', onClick: startGame, disabled: false }
+      ? {
+          key: 'start',
+          label: 'Start',
+          icon: 'play_arrow',
+          className: 'command-button',
+          onClick: startGame,
+          disabled: !startAction?.enabled,
+        }
       : null,
     showReady
-      ? { key: 'ready', label: 'Ready', icon: 'task_alt', className: 'command-button pulse', onClick: () => setReady(true), disabled: readyBlocked }
+      ? {
+          key: 'ready',
+          label: 'Ready',
+          icon: 'task_alt',
+          className: 'command-button pulse',
+          onClick: () => setReady(true),
+          disabled: !readyAction?.enabled || readyOverlayBlocked,
+        }
       : null,
     showNotReady
       ? showHivePlaceholder
         ? {
             key: 'hive-sync',
-            label: prepLabel,
+            label: placeholderLabel,
             icon: 'hive',
             className: 'command-button secondary prep-placeholder',
             onClick: () => {},
@@ -1391,13 +1527,13 @@ export function App() {
             icon: 'hourglass_top',
             className: 'command-button secondary',
             onClick: () => setReady(false),
-            disabled: interactionBlocked,
+            disabled: !unreadyAction?.enabled || readyOverlayBlocked,
           }
       : null,
     showHivePlaceholderAction
       ? {
           key: 'hive-sync',
-          label: prepLabel,
+          label: placeholderLabel,
           icon: 'hive',
           className: 'command-button secondary prep-placeholder',
           onClick: () => {},
@@ -1420,7 +1556,7 @@ export function App() {
         ? [
             {
               key: 'hive-sync',
-              label: prepLabel,
+              label: placeholderLabel,
               icon: 'hive',
               className: 'command-button secondary prep-placeholder layout-placeholder',
               onClick: () => {},
@@ -1442,10 +1578,13 @@ export function App() {
   function clearRoomState() {
     setRoom(null);
     setHand([]);
+    setAvailableActions([]);
     setEventOverlay(null);
     eventOverlayEndsAtRef.current = null;
     setGameLog([]);
     setLogOpen(false);
+    snapshotCorrelationRef.current = createSnapshotCorrelationState<RoomState, PrivatePlayerState>();
+    serverClockOffsetRef.current = 0;
     prevPileCountRef.current = 0;
   }
   function emitWithAck<T = any>(event: string, payload?: unknown): Promise<T> {
@@ -1477,6 +1616,7 @@ export function App() {
     manualAccessRef.current = true;
     setAccessBusy(true);
 
+    const requestSentAt = Date.now();
     const response = await emitWithAck<any>('room:create', { playerName, playerId });
 
     manualAccessRef.current = false;
@@ -1487,9 +1627,10 @@ export function App() {
       return;
     }
 
-    setRoom(response.room);
-    setHand([]);
-    saveRoomCode(response.room.code, response.room.displayCode ?? response.room.code);
+    if (response.snapshot) applyAuthoritativeSnapshot(response.snapshot, { clientSentAt: requestSentAt, forceRevealHand: true });
+    if (response.snapshot?.publicState) {
+      saveRoomCode(response.snapshot.publicState.code, response.snapshot.publicState.displayCode ?? response.snapshot.publicState.code);
+    }
   }
 
   async function joinRoom() {
@@ -1509,6 +1650,7 @@ export function App() {
     manualAccessRef.current = true;
     setAccessBusy(true);
 
+    const requestSentAt = Date.now();
     const response = await emitWithAck<any>('room:join', {
       roomCode: roomCodeInput.trim().toUpperCase(),
       playerName,
@@ -1523,16 +1665,18 @@ export function App() {
       return;
     }
 
-    setRoom(response.room);
-    setHand([]);
-    saveRoomCode(response.room.code, response.room.displayCode ?? response.room.code);
+    if (response.snapshot) applyAuthoritativeSnapshot(response.snapshot, { clientSentAt: requestSentAt, forceRevealHand: true });
+    if (response.snapshot?.publicState) {
+      saveRoomCode(response.snapshot.publicState.code, response.snapshot.publicState.displayCode ?? response.snapshot.publicState.code);
+    }
     setInfo(response.reconnected ? 'Reconnected to room' : 'Joined room');
   }
 
   function setReady(ready: boolean) {
     setError('');
-    if (readyBlocked) {
-      setError(activeInteractionLock?.reason === 'dealing' ? 'Wait until all cards are dealt' : 'Wait until the countdown finishes');
+    const targetAction = ready ? readyAction : unreadyAction;
+    if (!targetAction?.enabled || readyOverlayBlocked) {
+      setError(readyOverlayBlocked ? 'Wait until the level clear message finishes' : (targetAction?.reason ?? 'Could not update ready state'));
       return;
     }
     if (!socket) return;
@@ -1555,8 +1699,8 @@ export function App() {
 
   function playCard(card: number) {
     setError('');
-    if (!isPlaying || interactionBlocked) {
-      setError('You cannot play a card right now');
+    if (!playCardAction?.enabled) {
+      setError(playCardAction?.reason ?? 'You cannot play a card right now');
       return;
     }
     if (!socket) return;
@@ -1569,8 +1713,8 @@ export function App() {
 
   function requestPause() {
     setError('');
-    if (interactionBlocked) {
-      setError('Wait until the current transition finishes');
+    if (!pauseAction?.enabled) {
+      setError(pauseAction?.reason ?? 'Could not pause');
       return;
     }
     if (!socket) return;
@@ -1581,8 +1725,8 @@ export function App() {
 
   function proposeStar() {
     setError('');
-    if (interactionBlocked) {
-      setError('Wait until the current transition finishes');
+    if (!proposeStarAction?.enabled) {
+      setError(proposeStarAction?.reason ?? 'Could not propose star');
       return;
     }
     if (!socket) return;
@@ -1593,8 +1737,8 @@ export function App() {
 
   function acceptStar() {
     setError('');
-    if (interactionBlocked) {
-      setError('Wait until the current transition finishes');
+    if (!acceptStarAction?.enabled) {
+      setError(acceptStarAction?.reason ?? 'Could not accept star');
       return;
     }
     if (!socket) return;
@@ -1717,12 +1861,6 @@ export function App() {
               )}
             </button>
           )}
-          {room && <span className={`topbar-pill topbar-pill-static connection-pill connection-pill-${connectionState}`}>
-            <span className="material-symbols-rounded chip-icon" aria-hidden>
-              {connectionIcon(connectionState)}
-            </span>
-            <span className="topbar-pill-label">{connectionLabel(connectionState)}</span>
-          </span>}
         </div>
         {room && (
           <div className="topbar-right">
@@ -2234,9 +2372,9 @@ export function App() {
 
                   {primaryCard !== null ? (
                     <button
-                      className={`card face primary-card${isPlaying && primaryCard === minPlayableCard && !interactionBlocked ? ' playable' : ''}${isStarDiscardCard(primaryCard) ? ' is-star-discarding' : ''}`}
+                      className={`card face primary-card${playCardAction?.enabled && primaryCard === minPlayableCard ? ' playable' : ''}${isStarDiscardCard(primaryCard) ? ' is-star-discarding' : ''}`}
                       onClick={() => playCard(primaryCard)}
-                      disabled={!isPlaying || interactionBlocked || primaryCard !== minPlayableCard}
+                      disabled={!playCardAction?.enabled || primaryCard !== minPlayableCard}
                       title="Play this card"
                       style={{ borderColor: playerColorMap.get(playerId) ?? undefined } as any}
                     >

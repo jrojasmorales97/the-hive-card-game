@@ -16,7 +16,7 @@ test('overlayDurationMs returns the planned durations for each overlay kind', ()
   assert.equal(overlayDurationMs('error'), 5000);
   assert.equal(overlayDurationMs('pause'), 5000);
   assert.equal(overlayDurationMs('star-used'), 5000);
-  assert.equal(overlayDurationMs('level-complete'), 5000);
+  assert.equal(overlayDurationMs('level-complete'), 3000);
   assert.equal(overlayDurationMs('restarted'), 5000);
 });
 
