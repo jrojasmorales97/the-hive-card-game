@@ -20,7 +20,6 @@ import {
 import {
   findMyStarDiscard,
   mergeHandWithStarDiscard,
-  shouldUseTwoColumnStarDiscardLayout,
   type StarDiscardPreview,
 } from './starUi.js';
 import { podiumToneForRank, shouldUseTwoColumnFinalScoreLayout, timingFeedbackForBand } from './finalScoreUi.js';
@@ -1247,10 +1246,6 @@ export function App() {
   const starDiscardedCards = eventOverlay?.starDiscards ?? [];
   const myStarDiscardedCard = useMemo(() => findMyStarDiscard(starDiscardedCards, playerId), [playerId, starDiscardedCards]);
   const displayHand = useMemo(() => mergeHandWithStarDiscard(hand, myStarDiscardedCard), [hand, myStarDiscardedCard]);
-  const showTwoColumnStarDiscardLayout = shouldUseTwoColumnStarDiscardLayout(
-    starDiscardedCards.length,
-    starDiscardedCards.map((discard) => discard.playerName),
-  );
   const playerColorMap = useMemo(() => buildPlayerColorMap(room?.players ?? []), [room?.players]);
   const playersList = useMemo(() => room?.players ?? [], [room?.players]);
   const rivals = useMemo(
@@ -2099,7 +2094,7 @@ export function App() {
 
               {eventOverlay && game?.phase !== 'victory' && game?.phase !== 'game-over' && (
                 <div className={`countdown-overlay event-message-overlay ${eventOverlay.tone}`} aria-live="polite">
-                  <div className={`event-message-stack${eventOverlay.starDiscards?.length ? ' has-star-discards' : ''}`}>
+                  <div className="event-message-stack">
                     <h2 className={`event-message-headline ${eventOverlay.tone}`}>{eventOverlay.title}</h2>
 
                     {eventOverlay.tone === 'error' && eventOverlay.errorData && (
@@ -2126,22 +2121,6 @@ export function App() {
                     )}
 
                     {eventOverlay.message && <p className="event-message-copy">{eventOverlay.message}</p>}
-
-                    {eventOverlay.starDiscards && eventOverlay.starDiscards.length > 0 && (
-                      <div className={`star-discard-grid${showTwoColumnStarDiscardLayout ? ' two-columns' : ''}`}>
-                        {eventOverlay.starDiscards.map((discard) => (
-                          <article key={`${discard.playerId}-${discard.card}`} className="star-discard-row">
-                            <div className="card face star-discard-card" aria-hidden>
-                              <span className="center">{discard.card}</span>
-                              <span className="star-discard-x" />
-                            </div>
-                            <strong className="star-discard-player" style={{ color: playerColorMap.get(discard.playerId) }}>
-                              {discard.playerName}
-                            </strong>
-                          </article>
-                        ))}
-                      </div>
-                    )}
 
                     {eventOverlay.reward && (
                       <div className={`event-message-reward ${eventOverlay.reward}`}>

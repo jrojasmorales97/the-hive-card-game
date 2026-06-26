@@ -1414,16 +1414,35 @@ button:disabled {
     padding: 8px 44px 8px 10px;
   }
 
+  .final-score-head {
+    gap: 6px;
+    flex-wrap: nowrap;
+  }
+
   .final-score-rank {
     min-width: 28px;
     font-size: 16px;
   }
 
-  .final-score-head strong {
-    font-size: 13px;
+  .final-score-copy {
+    overflow: hidden;
   }
 
-  .final-score-band,
+  .final-score-head strong {
+    min-width: 0;
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .final-score-band {
+    min-width: 0;
+    padding: 2px 6px;
+    font-size: 9px;
+    flex-shrink: 0;
+  }
+
   .final-score-crown-ribbon {
     font-size: 9px;
   }
@@ -1445,6 +1464,58 @@ button:disabled {
 
   .final-score-value strong {
     font-size: 20px;
+  }
+}
+
+@media (max-width: 480px) {
+  .result-overlay {
+    padding: 10px 8px;
+    gap: 8px;
+  }
+
+  .final-scoreboard,
+  .final-scoreboard.two-columns {
+    grid-template-columns: 1fr;
+    gap: 7px;
+  }
+
+  .final-score-row {
+    gap: 7px;
+    padding: 7px 40px 7px 9px;
+  }
+
+  .final-score-rank {
+    min-width: 24px;
+    font-size: 14px;
+  }
+
+  .final-score-head strong {
+    font-size: 12px;
+  }
+
+  .final-score-band {
+    max-width: 92px;
+    font-size: 8px;
+    letter-spacing: 0.04em;
+  }
+
+  .final-score-value {
+    min-width: 34px;
+  }
+
+  .final-score-value strong {
+    font-size: 18px;
+  }
+
+  .final-score-crown-ribbon {
+    top: -10px;
+    right: 8px;
+    width: 28px;
+    height: 21px;
+  }
+
+  .final-score-crown-ribbon .material-symbols-rounded {
+    font-size: 17px;
   }
 }
 
@@ -3433,7 +3504,7 @@ button:disabled {
   opacity: 0;
   pointer-events: none;
   transition: transform 220ms ease, opacity 220ms ease;
-  z-index: 20;
+  z-index: 32;
 }
 
 .log-drawer.open {
