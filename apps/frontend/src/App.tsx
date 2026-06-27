@@ -19,9 +19,10 @@ import {
 } from './roomSync.js';
 import {
   findMyStarDiscard,
-  mergeHandWithStarDiscard,
+  starDiscardLaunchDelayMs,
   type StarDiscardPreview,
 } from './starUi.js';
+import { buildHandLayout, buildHandSlotPath, type HandSlotId } from './handLayout.js';
 import { podiumToneForRank, shouldUseTwoColumnFinalScoreLayout, timingFeedbackForBand } from './finalScoreUi.js';
 import { levelCompleteOverlayDelayMs } from './levelFlow.js';
 import {
@@ -300,6 +301,11 @@ type PileEntryOffset = {
   x: number;
   y: number;
   rot: number;
+};
+
+type StarDiscardFlight = {
+  card: number;
+  startRect: { left: number; top: number; width: number; height: number };
 };
 
 type StatusPulse = 'up' | 'down' | null;
@@ -628,12 +634,16 @@ export function App() {
   const [dealtHandCount, setDealtHandCount] = useState(0);
   const [isClearingPile, setIsClearingPile] = useState(false);
   const [isPileHidden, setIsPileHidden] = useState(false);
+  const [pendingLocalStarDiscardCard, setPendingLocalStarDiscardCard] = useState<number | null>(null);
+  const [hiddenStarDiscardCard, setHiddenStarDiscardCard] = useState<number | null>(null);
+  const [starDiscardFlight, setStarDiscardFlight] = useState<StarDiscardFlight | null>(null);
 
   const countdownTimeoutsRef = useRef<number[]>([]);
   const eventOverlayTimeoutRef = useRef<number | null>(null);
   const eventOverlayEndsAtRef = useRef<number | null>(null);
   const levelCompleteOverlayTimeoutRef = useRef<number | null>(null);
   const pileClearStartTimeoutRef = useRef<number | null>(null);
+  const starDiscardLaunchTimeoutRef = useRef<number | null>(null);
   const dealIntervalRef = useRef<number | null>(null);
   const previousHandKeyRef = useRef('');
   const previousHandPhaseRef = useRef<GamePhase | null>(null);
@@ -666,6 +676,11 @@ export function App() {
   });
   const centerPileRef = useRef<HTMLDivElement | null>(null);
   const playerCornerRefs = useRef(new Map<string, HTMLElement>());
+  const handSlotRefs = useRef(new Map<HandSlotId, HTMLDivElement>());
+  const handCardRefs = useRef(new Map<number, HTMLElement>());
+  const previousHandSlotMapRef = useRef<Record<number, HandSlotId>>({});
+  const pendingLocalPileEntryRef = useRef<{ card: number; entry: PileEntryOffset } | null>(null);
+  const starDiscardFlightRef = useRef<HTMLElement | null>(null);
   const [pileEntryMap, setPileEntryMap] = useState<Record<string, PileEntryOffset>>({});
 
   function setPlayerCornerRef(playerIdForRef: string) {
@@ -675,6 +690,27 @@ export function App() {
         return;
       }
       playerCornerRefs.current.delete(playerIdForRef);
+    };
+  }
+
+  function setHandSlotRef(slotId: HandSlotId) {
+    return (node: HTMLDivElement | null) => {
+      if (node) {
+        handSlotRefs.current.set(slotId, node);
+        return;
+      }
+      handSlotRefs.current.delete(slotId);
+    };
+  }
+
+  function setHandCardRef(card: number | null) {
+    return (node: HTMLElement | null) => {
+      if (card === null) return;
+      if (node) {
+        handCardRefs.current.set(card, node);
+        return;
+      }
+      handCardRefs.current.delete(card);
     };
   }
 
@@ -1057,6 +1093,8 @@ export function App() {
     s.on('game:star-used', (payload: StarUsedPayload & { version?: number }) => {
       if (!shouldApplyDecorativeEvent(payload?.version, snapshotCorrelationRef.current.lastAppliedVersion)) return;
       const msg = payload?.message ?? pickMessage(MSG.starUsed, Date.now());
+      const localDiscardCard = findMyStarDiscard(payload?.discarded ?? [], playerId);
+      if (localDiscardCard !== null) setPendingLocalStarDiscardCard(localDiscardCard);
       setInfo(msg);
       showEventOverlay(
         {
@@ -1225,6 +1263,11 @@ export function App() {
   }, [hand, room?.game?.phase]);
 
   useEffect(() => {
+    if (hiddenStarDiscardCard === null || hand.includes(hiddenStarDiscardCard)) return;
+    setHiddenStarDiscardCard(null);
+  }, [hand, hiddenStarDiscardCard]);
+
+  useEffect(() => {
     const el = logScrollRef.current;
     if (!el) return;
     if (logStickToBottomRef.current) el.scrollTop = 0;
@@ -1244,8 +1287,6 @@ export function App() {
   const game = room?.game ?? null;
   const pileCards = useMemo<PileCard[]>(() => game?.pileHistory ?? [], [game?.pileHistory]);
   const starDiscardedCards = eventOverlay?.starDiscards ?? [];
-  const myStarDiscardedCard = useMemo(() => findMyStarDiscard(starDiscardedCards, playerId), [playerId, starDiscardedCards]);
-  const displayHand = useMemo(() => mergeHandWithStarDiscard(hand, myStarDiscardedCard), [hand, myStarDiscardedCard]);
   const playerColorMap = useMemo(() => buildPlayerColorMap(room?.players ?? []), [room?.players]);
   const playersList = useMemo(() => room?.players ?? [], [room?.players]);
   const rivals = useMemo(
@@ -1326,6 +1367,81 @@ export function App() {
   useEffect(() => {
     prevPileCountRef.current = pileCards.length;
   }, [pileCards]);
+
+  useEffect(() => {
+    const latestPileCard = pileCards[pileCards.length - 1];
+    const pendingEntry = pendingLocalPileEntryRef.current;
+    if (!latestPileCard || !pendingEntry) return;
+    if (latestPileCard.playerId !== playerId || latestPileCard.value !== pendingEntry.card) return;
+
+    const clearId = window.requestAnimationFrame(() => {
+      pendingLocalPileEntryRef.current = null;
+    });
+    return () => window.cancelAnimationFrame(clearId);
+  }, [pileCards, playerId]);
+
+  useEffect(() => {
+    if (pendingLocalStarDiscardCard === null || starDiscardFlight || hiddenStarDiscardCard === pendingLocalStarDiscardCard) return;
+
+    const cardNode = handCardRefs.current.get(pendingLocalStarDiscardCard);
+    if (!cardNode) return;
+    const rect = cardNode.getBoundingClientRect();
+
+    if (starDiscardLaunchTimeoutRef.current) {
+      window.clearTimeout(starDiscardLaunchTimeoutRef.current);
+      starDiscardLaunchTimeoutRef.current = null;
+    }
+
+    const launchDelayMs = starDiscardLaunchDelayMs(eventOverlayEndsAtRef.current);
+    starDiscardLaunchTimeoutRef.current = window.setTimeout(() => {
+      setHiddenStarDiscardCard(pendingLocalStarDiscardCard);
+      setStarDiscardFlight({
+        card: pendingLocalStarDiscardCard,
+        startRect: {
+          left: rect.left,
+          top: rect.top,
+          width: rect.width,
+          height: rect.height,
+        },
+      });
+      starDiscardLaunchTimeoutRef.current = null;
+    }, launchDelayMs);
+
+    return () => {
+      if (starDiscardLaunchTimeoutRef.current) {
+        window.clearTimeout(starDiscardLaunchTimeoutRef.current);
+        starDiscardLaunchTimeoutRef.current = null;
+      }
+    };
+  }, [hiddenStarDiscardCard, pendingLocalStarDiscardCard, starDiscardFlight]);
+
+  useEffect(() => {
+    const flight = starDiscardFlight;
+    const node = starDiscardFlightRef.current;
+    if (!flight || !node) return;
+
+    const dx = window.innerWidth - flight.startRect.left + flight.startRect.width * 0.55;
+    const dy = window.innerHeight - flight.startRect.top + flight.startRect.height * 0.55;
+    const animation = node.animate(
+      [
+        { transform: 'translate(0px, 0px) rotate(0deg)', opacity: 1 },
+        { transform: `translate(${dx}px, ${dy}px) rotate(16deg)`, opacity: 0.14 },
+      ],
+      {
+        duration: 760,
+        easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+        fill: 'forwards',
+      },
+    );
+
+    animation.onfinish = () => {
+      setStarDiscardFlight(null);
+      setPendingLocalStarDiscardCard(null);
+      socket?.emit('star:discard-animation-complete');
+    };
+
+    return () => animation.cancel();
+  }, [socket, starDiscardFlight]);
 
   useEffect(() => {
     const nextLives = game?.lives ?? null;
@@ -1422,30 +1538,74 @@ export function App() {
     !showAcceptStar;
   const currentReward = game ? rewardLabel(game.currentLevel) : 'No reward';
   const currentRewardType = game ? REWARDS[game.currentLevel] ?? null : null;
-  const visibleHandCount = myStarDiscardedCard !== null ? displayHand.length : dealtHandCount;
-  const dealtCards = useMemo(() => displayHand.slice(0, visibleHandCount), [displayHand, visibleHandCount]);
+  const dealtCards = useMemo(() => hand.slice(0, dealtHandCount), [hand, dealtHandCount]);
   const orderedDealtCards = useMemo(() => [...dealtCards].sort((a, b) => a - b), [dealtCards]);
-  const primaryCard = orderedDealtCards[0] ?? null;
-  const maxQueueSlotCount = Math.max(0, (game?.maxLevel ?? 1) - 1);
-  const queueCards = useMemo(
-    () => orderedDealtCards.slice(1).sort((a, b) => a - b).slice(0, maxQueueSlotCount),
-    [maxQueueSlotCount, orderedDealtCards],
-  );
-  const ghostSlotCount = Math.max(0, maxQueueSlotCount - queueCards.length);
-  const queueSlots = useMemo(() => [...queueCards, ...Array.from({ length: ghostSlotCount }, () => null)], [ghostSlotCount, queueCards]);
-  const queueTopRow = useMemo(() => queueSlots.slice(0, 5), [queueSlots]);
-  const queueCurveSlot = queueSlots.length > 5 ? queueSlots[5] : null;
-  const showQueueCurveSlot = queueSlots.length > 5;
-  const queueBottomRow = useMemo(() => queueSlots.slice(6), [queueSlots]);
+  const handLayout = useMemo(() => buildHandLayout(orderedDealtCards, game?.maxLevel ?? 1), [game?.maxLevel, orderedDealtCards]);
+  const primaryCard = handLayout.primaryCard;
+  const queueTopRow = handLayout.topRow;
+  const queueCurveSlot = handLayout.curveSlot;
+  const showQueueCurveSlot = Boolean(queueCurveSlot);
+  const queueBottomRow = handLayout.bottomRow;
   const finalResults = game?.finalResults ?? [];
   const showTwoColumnFinalScoreLayout = shouldUseTwoColumnFinalScoreLayout(finalResults.length);
-  const queueCardStyle = (index: number, card: number | null) => {
+  const queueCardStyle = (slotId: HandSlotId, card: number | null) => {
+    const slotIndex = Math.max(0, handLayout.slotOrder.indexOf(slotId) - 1);
     return {
       ...(card !== null ? { borderColor: playerColorMap.get(playerId) ?? undefined } : {}),
-      '--queue-deal-delay': `${index * 34}ms`,
+      '--queue-deal-delay': `${slotIndex * 34}ms`,
     } as any;
   };
-  const isStarDiscardCard = (card: number | null) => card !== null && myStarDiscardedCard !== null && card === myStarDiscardedCard;
+  const isStarDiscardCard = (card: number | null) => card !== null && pendingLocalStarDiscardCard !== null && card === pendingLocalStarDiscardCard;
+  const shouldHideHandCardForStarDiscard = (card: number | null) => card !== null && hiddenStarDiscardCard === card;
+
+  useEffect(() => {
+    const phase = room?.game?.phase ?? null;
+    const nextSlotMap = handLayout.cardSlotMap;
+
+    if (phase !== 'playing') {
+      previousHandSlotMapRef.current = { ...nextSlotMap };
+      return;
+    }
+
+    const previousSlotMap = previousHandSlotMapRef.current;
+    previousHandSlotMapRef.current = { ...nextSlotMap };
+    if (Object.keys(previousSlotMap).length === 0) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      Object.entries(nextSlotMap).forEach(([cardKey, nextSlotId]) => {
+        const card = Number(cardKey);
+        const previousSlotId = previousSlotMap[card];
+        if (!previousSlotId || previousSlotId === nextSlotId) return;
+
+        const cardNode = handCardRefs.current.get(card);
+        const finalSlotNode = handSlotRefs.current.get(nextSlotId);
+        if (!cardNode || !finalSlotNode) return;
+
+        const finalRect = finalSlotNode.getBoundingClientRect();
+        const path = buildHandSlotPath(previousSlotId, nextSlotId, handLayout.slotOrder);
+        const keyframes = path
+          .map((slotId) => {
+            const slotNode = handSlotRefs.current.get(slotId);
+            if (!slotNode) return null;
+            const rect = slotNode.getBoundingClientRect();
+            return {
+              transform: `translate(${rect.left - finalRect.left}px, ${rect.top - finalRect.top}px) scale(${rect.width / finalRect.width}, ${rect.height / finalRect.height})`,
+            };
+          })
+          .filter(Boolean) as Array<{ transform: string }>;
+
+        if (keyframes.length < 2) return;
+
+        cardNode.getAnimations().forEach((animation) => animation.cancel());
+        cardNode.animate(keyframes, {
+          duration: 220 + Math.max(0, path.length - 1) * 120,
+          easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+        });
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [handLayout.cardSlotMap, handLayout.slotOrder, room?.game?.phase]);
   const baseCommandActions = [
     showProposeStar
       ? {
@@ -1575,12 +1735,21 @@ export function App() {
     setHand([]);
     setAvailableActions([]);
     setEventOverlay(null);
+    setPendingLocalStarDiscardCard(null);
+    setHiddenStarDiscardCard(null);
+    setStarDiscardFlight(null);
+    if (starDiscardLaunchTimeoutRef.current) {
+      window.clearTimeout(starDiscardLaunchTimeoutRef.current);
+      starDiscardLaunchTimeoutRef.current = null;
+    }
     eventOverlayEndsAtRef.current = null;
     setGameLog([]);
     setLogOpen(false);
     snapshotCorrelationRef.current = createSnapshotCorrelationState<RoomState, PrivatePlayerState>();
     serverClockOffsetRef.current = 0;
     prevPileCountRef.current = 0;
+    previousHandSlotMapRef.current = {};
+    pendingLocalPileEntryRef.current = null;
   }
   function emitWithAck<T = any>(event: string, payload?: unknown): Promise<T> {
     return new Promise((resolve) => {
@@ -1698,9 +1867,28 @@ export function App() {
       setError(playCardAction?.reason ?? 'You cannot play a card right now');
       return;
     }
+
+    if (card === primaryCard) {
+      const primaryNode = handCardRefs.current.get(card);
+      const centerNode = centerPileRef.current;
+      if (primaryNode && centerNode) {
+        const primaryRect = primaryNode.getBoundingClientRect();
+        const centerRect = centerNode.getBoundingClientRect();
+        pendingLocalPileEntryRef.current = {
+          card,
+          entry: {
+            x: Math.round(primaryRect.left + primaryRect.width / 2 - (centerRect.left + centerRect.width / 2)),
+            y: Math.round(primaryRect.top + primaryRect.height / 2 - (centerRect.top + centerRect.height / 2)),
+            rot: 0,
+          },
+        };
+      }
+    }
+
     if (!socket) return;
     socket.emit('game:play-card', { card }, (response: any) => {
       if (!response?.ok) {
+        pendingLocalPileEntryRef.current = null;
         setError(response?.error ?? 'Could not play card');
       }
     });
@@ -2061,7 +2249,11 @@ export function App() {
                       ...pileStyle(
                         index,
                         card.value,
-                        pileEntryMap[card.playerId] ?? pileEntryOffset(playerCornerMap.get(card.playerId) ?? SELF_POSITION),
+                        pendingLocalPileEntryRef.current &&
+                          card.playerId === playerId &&
+                          card.value === pendingLocalPileEntryRef.current.card
+                          ? pendingLocalPileEntryRef.current.entry
+                          : (pileEntryMap[card.playerId] ?? pileEntryOffset(playerCornerMap.get(card.playerId) ?? SELF_POSITION)),
                       ),
                       '--clear-delay': `${index * 48}ms`,
                       borderColor: playerColorMap.get(card.playerId) ?? undefined,
@@ -2304,43 +2496,49 @@ export function App() {
               <div className="deck-panel">
                 <div className="command-hand-row">
                   <div className={`command-queue${showQueueCurveSlot ? ' has-curve' : ''}${primaryCard === null ? ' is-empty' : ''}`} aria-label="Upcoming cards">
-                    {showQueueCurveSlot && (
-                      <div
-                        className={`card face queue-card queue-curve${queueCurveSlot !== null ? ' filled' : ' ghost'}${isStarDiscardCard(queueCurveSlot) ? ' is-star-discarding' : ''}`}
-                        aria-hidden={queueCurveSlot === null}
-                        style={queueCardStyle(5, queueCurveSlot)}
-                      >
-                            {queueCurveSlot !== null ? <span className="center">{queueCurveSlot}</span> : <span className="queue-slot-ghost-dot" />}
-                            {isStarDiscardCard(queueCurveSlot) && <span className="star-discard-x" />}
-                          </div>
+                    {queueCurveSlot && (
+                      <div className="queue-slot-shell queue-curve-shell" ref={setHandSlotRef(queueCurveSlot.id)}>
+                        <div
+                          ref={setHandCardRef(queueCurveSlot.card)}
+                          className={`card face queue-card queue-curve${queueCurveSlot.card !== null ? ' filled' : ' ghost'}${isStarDiscardCard(queueCurveSlot.card) ? ' is-star-discarding' : ''}${shouldHideHandCardForStarDiscard(queueCurveSlot.card) ? ' hand-card-hidden-for-flight' : ''}`}
+                          aria-hidden={queueCurveSlot.card === null}
+                          style={queueCardStyle(queueCurveSlot.id, queueCurveSlot.card)}
+                        >
+                          {queueCurveSlot.card !== null ? <span className="center">{queueCurveSlot.card}</span> : <span className="queue-slot-ghost-dot" />}
+                          {isStarDiscardCard(queueCurveSlot.card) && <span className="star-discard-x" />}
+                        </div>
+                      </div>
                     )}
                     <div className="queue-grid">
                       <div className="queue-row queue-row-top">
-                        {queueTopRow.map((card, index) => (
-                          <div
-                            key={`queue-top-${index}`}
-                            className={`card face queue-card${card !== null ? ' filled' : ' ghost'}${isStarDiscardCard(card) ? ' is-star-discarding' : ''}`}
-                            aria-hidden={card === null}
-                            style={queueCardStyle(index, card)}
-                          >
-                            {card !== null ? <span className="center">{card}</span> : <span className="queue-slot-ghost-dot" />}
-                            {isStarDiscardCard(card) && <span className="star-discard-x" />}
+                        {queueTopRow.map((slot) => (
+                          <div key={slot.id} className="queue-slot-shell" ref={setHandSlotRef(slot.id)}>
+                            <div
+                              ref={setHandCardRef(slot.card)}
+                              className={`card face queue-card${slot.card !== null ? ' filled' : ' ghost'}${isStarDiscardCard(slot.card) ? ' is-star-discarding' : ''}${shouldHideHandCardForStarDiscard(slot.card) ? ' hand-card-hidden-for-flight' : ''}`}
+                              aria-hidden={slot.card === null}
+                              style={queueCardStyle(slot.id, slot.card)}
+                            >
+                              {slot.card !== null ? <span className="center">{slot.card}</span> : <span className="queue-slot-ghost-dot" />}
+                              {isStarDiscardCard(slot.card) && <span className="star-discard-x" />}
+                            </div>
                           </div>
                         ))}
                       </div>
                       {queueBottomRow.length > 0 && (
                         <div className="queue-row queue-row-bottom">
-                          {queueBottomRow.map((card, index) => {
-                            const slotIndex = index + 6;
+                          {queueBottomRow.map((slot) => {
                             return (
-                              <div
-                                key={`queue-bottom-${slotIndex}`}
-                                className={`card face queue-card${card !== null ? ' filled' : ' ghost'}${isStarDiscardCard(card) ? ' is-star-discarding' : ''}`}
-                                aria-hidden={card === null}
-                                style={queueCardStyle(slotIndex, card)}
-                              >
-                                {card !== null ? <span className="center">{card}</span> : <span className="queue-slot-ghost-dot" />}
-                                {isStarDiscardCard(card) && <span className="star-discard-x" />}
+                              <div key={slot.id} className="queue-slot-shell" ref={setHandSlotRef(slot.id)}>
+                                <div
+                                  ref={setHandCardRef(slot.card)}
+                                  className={`card face queue-card${slot.card !== null ? ' filled' : ' ghost'}${isStarDiscardCard(slot.card) ? ' is-star-discarding' : ''}${shouldHideHandCardForStarDiscard(slot.card) ? ' hand-card-hidden-for-flight' : ''}`}
+                                  aria-hidden={slot.card === null}
+                                  style={queueCardStyle(slot.id, slot.card)}
+                                >
+                                  {slot.card !== null ? <span className="center">{slot.card}</span> : <span className="queue-slot-ghost-dot" />}
+                                  {isStarDiscardCard(slot.card) && <span className="star-discard-x" />}
+                                </div>
                               </div>
                             );
                           })}
@@ -2350,25 +2548,51 @@ export function App() {
                   </div>
 
                   {primaryCard !== null ? (
-                    <button
-                      className={`card face primary-card${playCardAction?.enabled && primaryCard === minPlayableCard ? ' playable' : ''}${isStarDiscardCard(primaryCard) ? ' is-star-discarding' : ''}`}
-                      onClick={() => playCard(primaryCard)}
-                      disabled={!playCardAction?.enabled || primaryCard !== minPlayableCard}
-                      title="Play this card"
-                      style={{ borderColor: playerColorMap.get(playerId) ?? undefined } as any}
-                    >
-                      <span className="corner tl">{primaryCard}</span>
-                      <span className="center">{primaryCard}</span>
-                      <span className="corner br">{primaryCard}</span>
-                      {isStarDiscardCard(primaryCard) && <span className="star-discard-x" />}
-                    </button>
+                    <div className="primary-slot-shell" ref={setHandSlotRef('primary')}>
+                      <button
+                        ref={setHandCardRef(primaryCard)}
+                        className={`card face primary-card${playCardAction?.enabled && primaryCard === minPlayableCard ? ' playable' : ''}${isStarDiscardCard(primaryCard) ? ' is-star-discarding' : ''}${shouldHideHandCardForStarDiscard(primaryCard) ? ' hand-card-hidden-for-flight' : ''}`}
+                        onClick={() => playCard(primaryCard)}
+                        disabled={!playCardAction?.enabled || primaryCard !== minPlayableCard}
+                        title="Play this card"
+                        style={{ borderColor: playerColorMap.get(playerId) ?? undefined } as any}
+                      >
+                        <span className="corner tl">{primaryCard}</span>
+                        <span className="center">{primaryCard}</span>
+                        <span className="corner br">{primaryCard}</span>
+                        {isStarDiscardCard(primaryCard) && <span className="star-discard-x" />}
+                      </button>
+                    </div>
                   ) : (
-                    <div className="primary-card-empty">No card</div>
+                    <div className="primary-slot-shell" ref={setHandSlotRef('primary')}>
+                      <div className="primary-card-empty">No card</div>
+                    </div>
                   )}
                 </div>
               </div>
             </section>
           </section>
+
+          {starDiscardFlight && (
+            <div className="floating-card-layer" aria-hidden>
+              <article
+                ref={starDiscardFlightRef}
+                className="card face floating-card floating-star-discard"
+                style={{
+                  left: `${starDiscardFlight.startRect.left}px`,
+                  top: `${starDiscardFlight.startRect.top}px`,
+                  width: `${starDiscardFlight.startRect.width}px`,
+                  height: `${starDiscardFlight.startRect.height}px`,
+                  borderColor: playerColorMap.get(playerId) ?? undefined,
+                } as any}
+              >
+                <span className="corner tl">{starDiscardFlight.card}</span>
+                <span className="center">{starDiscardFlight.card}</span>
+                <span className="corner br">{starDiscardFlight.card}</span>
+                <span className="star-discard-x" />
+              </article>
+            </div>
+          )}
 
           <aside id="game-log-drawer" className={`log-drawer panel${logOpen ? ' open' : ''}`} aria-label="Game log">
             <header className="log-drawer-header">

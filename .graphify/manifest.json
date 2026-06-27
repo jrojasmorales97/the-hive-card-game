@@ -8,20 +8,20 @@
     "hash": "d6b9f85b81214876444cabccec831fc2"
   },
   "apps/backend/src/gameTiming.test.ts": {
-    "mtime": 1782455681489.568,
-    "hash": "03874e8fbcc21d2b94cc5b028b4c7659"
+    "mtime": 1782561301856.04,
+    "hash": "2ff6b673cecb6857c9ba723637255f24"
   },
   "apps/backend/src/gameTiming.ts": {
-    "mtime": 1782455681472.568,
-    "hash": "407aceeecdb54516f6f4c57eddfaaf8b"
+    "mtime": 1782561265231.0293,
+    "hash": "c27e98cc728b6af1503afb049aeab7a0"
   },
   "apps/backend/src/index.ts": {
-    "mtime": 1782460450476.9536,
-    "hash": "485455f54e06fafdfe334030e729686e"
+    "mtime": 1782563421529.6318,
+    "hash": "343c4eb94a48453cdfcca4422e19d938"
   },
   "apps/frontend/src/App.tsx": {
-    "mtime": 1782460771241.0703,
-    "hash": "933429c21814c399ccad6333a88f6ec5"
+    "mtime": 1782563700784.7063,
+    "hash": "feec64ff29634d5afa66d74325e35c77"
   },
   "apps/frontend/src/connectionStatus.test.ts": {
     "mtime": 1782315465744.5913,
@@ -276,12 +276,12 @@
     "hash": "a761055f0e15e30c6463061f30d72625"
   },
   "apps/frontend/src/messageTiming.test.ts": {
-    "mtime": 1782455681470.527,
-    "hash": "9786a47a9d5ccad503b4f7b22a871fa3"
+    "mtime": 1782487871881.282,
+    "hash": "da4081d75732c0a4640e39121cf44558"
   },
   "apps/frontend/src/messageTiming.ts": {
-    "mtime": 1782455681455.5679,
-    "hash": "ef880040b655e9035bd9156b22baacf2"
+    "mtime": 1782487871872.282,
+    "hash": "17520f3476710bb09951211edfc73b05"
   },
   "apps/frontend/src/starUi.test.ts": {
     "mtime": 1782452288661.1821,
@@ -292,8 +292,8 @@
     "hash": "4e6e0047ee2030ce7ee39d796c39b0bc"
   },
   ".graphify/GRAPH_REPORT.md": {
-    "mtime": 1782456657488.8044,
-    "hash": "b8c6fd1340c1881767a69cfe4be50b05"
+    "mtime": 1782561353079.055,
+    "hash": "beae0949a88f226836aac73dc190b251"
   },
   ".graphify/scratch/assistant-extract-instructions.md": {
     "mtime": 1782375530927.3008,
@@ -342,5 +342,25 @@
   "plans/2026-06-26/plan_sincronizacion-level-complete.md": {
     "mtime": 1782456292777.5771,
     "hash": "6825092bed9b13fc27354ec7ee22ab2f"
+  },
+  "apps/backend/src/privateState.test.ts": {
+    "mtime": 1782487110912.5994,
+    "hash": "f4cdf96e1ef87083a6a95879d2c48e31"
+  },
+  "apps/backend/src/privateState.ts": {
+    "mtime": 1782487103084.5925,
+    "hash": "33d7b08a8ae88db2567a110d9958224f"
+  },
+  "apps/frontend/src/roomSync.test.ts": {
+    "mtime": 1782486821041.3542,
+    "hash": "b85b0b658a2ab744062ccfee5b4766aa"
+  },
+  "apps/frontend/src/roomSync.ts": {
+    "mtime": 1782486813526.348,
+    "hash": "93471b66f93879b8d169965d4494c7cb"
+  },
+  "plans/2026-06-26/plan_refactor-sincronizacion-temporal.md": {
+    "mtime": 1782459807310.8962,
+    "hash": "7f271305a955c9537c044c3c7c74cf04"
   }
 }

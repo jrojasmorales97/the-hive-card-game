@@ -44,7 +44,7 @@ export function discardLowerCards<T extends { hand: number[] }>(players: Record<
   return discarded;
 }
 
-export function discardLowestCardPerPlayer<T extends { id: string; name: string; hand: number[] }>(
+export function previewLowestCardPerPlayer<T extends { id: string; name: string; hand: number[] }>(
   players: Record<string, T>,
 ): StarDiscardPreview[] {
   const discarded: StarDiscardPreview[] = [];
@@ -52,14 +52,34 @@ export function discardLowestCardPerPlayer<T extends { id: string; name: string;
   Object.values(players).forEach((player) => {
     if (player.hand.length === 0) return;
 
-    const lowest = Math.min(...player.hand);
-    player.hand = player.hand.filter((card) => card !== lowest);
     discarded.push({
-      card: lowest,
+      card: Math.min(...player.hand),
       playerId: player.id,
       playerName: player.name,
     });
   });
 
   return discarded.sort((a, b) => a.card - b.card || a.playerName.localeCompare(b.playerName));
+}
+
+export function applyStarDiscardPreview<T extends { hand: number[] }>(
+  players: Record<string, T>,
+  discarded: StarDiscardPreview[],
+): void {
+  discarded.forEach((entry) => {
+    const player = players[entry.playerId];
+    if (!player) return;
+
+    const discardIndex = player.hand.indexOf(entry.card);
+    if (discardIndex === -1) return;
+    player.hand.splice(discardIndex, 1);
+  });
+}
+
+export function discardLowestCardPerPlayer<T extends { id: string; name: string; hand: number[] }>(
+  players: Record<string, T>,
+): StarDiscardPreview[] {
+  const discarded = previewLowestCardPerPlayer(players);
+  applyStarDiscardPreview(players, discarded);
+  return discarded;
 }

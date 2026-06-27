@@ -4,16 +4,23 @@ import { Server } from 'socket.io';
 import { calculateFinalResults, type FinalPlayerResult } from './finalScoring.js';
 import { buildPrivateActions, type PrivateAction } from './privateState.js';
 import {
+  acknowledgePendingStarResolution,
+  createPendingStarResolution,
+  isPendingStarResolutionComplete,
+  type PendingStarResolution,
+} from './starResolution.js';
+import {
   ERROR_LOCK_MS,
   LEVEL_COMPLETE_LOCK_MS,
   STAR_RESOLUTION_LOCK_MS,
+  applyStarDiscardPreview,
   createInteractionLock,
-  discardLowestCardPerPlayer,
   discardLowerCards,
   getDealLockDuration,
   isInteractionLockActive,
   type InteractionLock,
   type StarDiscardPreview,
+  previewLowestCardPerPlayer,
 } from './gameTiming.js';
 import { nextLevelAdvanceDelayMs, nextLevelReadyLockMs } from './levelFlow.js';
 
@@ -83,6 +90,8 @@ const socketPlayer = new Map<string, string>();
 const cpuPlayTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const levelCompleteTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const interactionLockTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const pendingStarResolutions = new Map<string, PendingStarResolution>();
+const starResolutionTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let logSeq = 0;
 
 const MAX_PLAYERS = 8;
@@ -361,6 +370,19 @@ function clearInteractionLockTimer(roomCode: string) {
 
   clearTimeout(timer);
   interactionLockTimers.delete(roomCode);
+}
+
+function clearStarResolutionTimer(roomCode: string) {
+  const timer = starResolutionTimers.get(roomCode);
+  if (!timer) return;
+
+  clearTimeout(timer);
+  starResolutionTimers.delete(roomCode);
+}
+
+function clearPendingStarResolution(roomCode: string) {
+  pendingStarResolutions.delete(roomCode);
+  clearStarResolutionTimer(roomCode);
 }
 
 function hasActiveInteractionLock(room: Room): boolean {
@@ -790,8 +812,29 @@ function resolveStarIfEveryoneAccepted(room: Room, roomCode: string): boolean {
   const initiatorId = room.game.starProposal.initiatorId;
   clearCpuTurn(roomCode);
   const discarded = resolveStar(room, roomCode);
+  const pendingResolution = createPendingStarResolution(discarded, room.players);
+  pendingStarResolutions.set(roomCode, pendingResolution);
+  clearStarResolutionTimer(roomCode);
+  starResolutionTimers.set(
+    roomCode,
+    setTimeout(() => {
+      starResolutionTimers.delete(roomCode);
+
+      const latestRoom = rooms.get(roomCode);
+      if (!latestRoom?.game) {
+        pendingStarResolutions.delete(roomCode);
+        return;
+      }
+
+      settlePendingStarResolution(latestRoom, roomCode);
+    }, STAR_RESOLUTION_LOCK_MS),
+  );
   setInteractionLock(room, roomCode, 'star', STAR_RESOLUTION_LOCK_MS, (latestRoom) => {
     if (!latestRoom.game || latestRoom.game.phase !== 'playing') return;
+
+    if (pendingStarResolutions.has(roomCode)) settlePendingStarResolution(latestRoom, roomCode);
+    if (countRemainingCards(latestRoom) === 0) return;
+
     scheduleCpuTurn(roomCode, 0);
   });
   io.to(roomCode).emit('game:star-used', {
@@ -803,16 +846,23 @@ function resolveStarIfEveryoneAccepted(room: Room, roomCode: string): boolean {
     byPlayerId: initiatorId,
     discarded,
   });
+  if (isPendingStarResolutionComplete(pendingResolution)) settlePendingStarResolution(room, roomCode);
   return true;
 }
 
 function resolveStar(room: Room, roomCode: string): StarDiscardPreview[] {
   if (!room.game || room.game.stars <= 0) return [];
 
-  const discarded = discardLowestCardPerPlayer(room.players);
+  const discarded = previewLowestCardPerPlayer(room.players);
 
   room.game.stars -= 1;
   room.game.starProposal = null;
+
+  return discarded;
+}
+
+function finalizeStarResolution(room: Room, roomCode: string, discarded: StarDiscardPreview[]) {
+  applyStarDiscardPreview(room.players, discarded);
 
   discarded.forEach((entry) => {
     emitGameLog(roomCode, 'game:discard', {
@@ -822,12 +872,34 @@ function resolveStar(room: Room, roomCode: string): StarDiscardPreview[] {
       reason: 'star',
     });
   });
+}
+
+function settlePendingStarResolution(room: Room, roomCode: string) {
+  const pending = pendingStarResolutions.get(roomCode);
+  if (!pending || !room.game) return false;
+
+  clearPendingStarResolution(roomCode);
+  finalizeStarResolution(room, roomCode, pending.discarded);
+  emitRoomUpdate(roomCode);
 
   if (countRemainingCards(room) === 0) {
     scheduleLevelCompletionAfterRoundOut(room, roomCode);
   }
 
-  return discarded;
+  return true;
+}
+
+function acknowledgeStarDiscardAnimation(roomCode: string, playerId: string) {
+  const room = rooms.get(roomCode);
+  const pending = pendingStarResolutions.get(roomCode);
+  if (!room || !pending) return false;
+
+  const nextPending = acknowledgePendingStarResolution(pending, playerId);
+  if (nextPending !== pending) pendingStarResolutions.set(roomCode, nextPending);
+  if (!isPendingStarResolutionComplete(nextPending)) return true;
+
+  settlePendingStarResolution(room, roomCode);
+  return true;
 }
 
 function pickNextHost(room: Room, roomCode?: string) {
@@ -888,6 +960,7 @@ function removePlayerCompletely(playerId: string) {
     clearCpuTurn(roomCode);
     clearLevelCompleteTimer(roomCode);
     clearInteractionLockTimer(roomCode);
+    clearPendingStarResolution(roomCode);
     rooms.delete(roomCode);
     return;
   }
@@ -919,6 +992,8 @@ function markSocketDisconnected(socketId: string) {
   if (player.socketId === socketId) player.socketId = null;
   player.connected = false;
   player.ready = false;
+
+  acknowledgeStarDiscardAnimation(roomCode, playerId);
 
   if (room.hostId === playerId) pickNextHost(room, roomCode);
   emitRoomUpdate(roomCode);
@@ -994,6 +1069,7 @@ function resetDevCpuRoomToLobby(room: Room, roomCode: string) {
 
   clearCpuTurn(roomCode);
   clearLevelCompleteTimer(roomCode);
+  clearPendingStarResolution(roomCode);
   room.status = 'lobby';
   room.game = null;
 
@@ -1291,6 +1367,7 @@ io.on('connection', (socket) => {
     const startedAt = Date.now();
     clearLevelCompleteTimer(ctx.roomCode);
     clearInteractionLockTimer(ctx.roomCode);
+    clearPendingStarResolution(ctx.roomCode);
     ctx.room.status = 'in-game';
     ctx.room.game = {
       phase: 'focus',
@@ -1458,6 +1535,17 @@ io.on('connection', (socket) => {
     }
 
     emitRoomUpdate(ctx.roomCode);
+    ack?.({ ok: true });
+  });
+
+  socket.on('star:discard-animation-complete', (ack?: (response: unknown) => void) => {
+    const ctx = getSocketContext(socket.id);
+    if (!ctx) {
+      ack?.({ ok: false, error: 'You are not in a room' });
+      return;
+    }
+
+    acknowledgeStarDiscardAnimation(ctx.roomCode, ctx.playerId);
     ack?.({ ok: true });
   });
 

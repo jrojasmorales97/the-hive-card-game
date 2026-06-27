@@ -17,3 +17,8 @@ export function shouldUseTwoColumnStarDiscardLayout(discardCount: number, player
   const longestName = Math.max(0, ...playerNames.map((name) => name.trim().length));
   return discardCount > 6 && longestName <= 18;
 }
+
+export function starDiscardLaunchDelayMs(blockingUntil: number | null, now = Date.now()): number {
+  if (blockingUntil === null) return 0;
+  return Math.max(0, blockingUntil - now);
+}

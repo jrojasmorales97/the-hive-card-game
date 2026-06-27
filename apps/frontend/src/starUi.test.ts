@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   findMyStarDiscard,
   mergeHandWithStarDiscard,
+  starDiscardLaunchDelayMs,
   shouldUseTwoColumnStarDiscardLayout,
   type StarDiscardPreview,
 } from './starUi.js';
@@ -32,4 +33,10 @@ test('shouldUseTwoColumnStarDiscardLayout only switches after six discards', () 
 test('shouldUseTwoColumnStarDiscardLayout avoids columns when names need more width', () => {
   assert.equal(shouldUseTwoColumnStarDiscardLayout(8, ['Alpha', 'Bravo']), true);
   assert.equal(shouldUseTwoColumnStarDiscardLayout(8, ['A very long player name']), false);
+});
+
+test('starDiscardLaunchDelayMs waits until the star overlay finishes before launching discard flight', () => {
+  assert.equal(starDiscardLaunchDelayMs(4200, 1000), 3200);
+  assert.equal(starDiscardLaunchDelayMs(800, 1000), 0);
+  assert.equal(starDiscardLaunchDelayMs(null, 1000), 0);
 });

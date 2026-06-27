@@ -7,11 +7,13 @@ import {
   ERROR_LOCK_MS,
   LEVEL_COMPLETE_LOCK_MS,
   STAR_RESOLUTION_LOCK_MS,
+  applyStarDiscardPreview,
   createInteractionLock,
   discardLowestCardPerPlayer,
   discardLowerCards,
   getDealLockDuration,
   isInteractionLockActive,
+  previewLowestCardPerPlayer,
 } from './gameTiming.js';
 
 test('createInteractionLock stores reason and deadline', () => {
@@ -77,6 +79,51 @@ test('discardLowestCardPerPlayer removes one lowest card per player and returns 
     { card: 3, playerId: 'd', playerName: 'Delta' },
     { card: 8, playerId: 'b', playerName: 'Bravo' },
   ]);
+  assert.deepEqual(players, {
+    a: { id: 'a', name: 'Alpha', hand: [9, 5] },
+    b: { id: 'b', name: 'Bravo', hand: [] },
+    c: { id: 'c', name: 'Charlie', hand: [] },
+    d: { id: 'd', name: 'Delta', hand: [11] },
+  });
+});
+
+test('previewLowestCardPerPlayer returns the planned star discards without mutating hands', () => {
+  const players = {
+    a: { id: 'a', name: 'Alpha', hand: [9, 2, 5] },
+    b: { id: 'b', name: 'Bravo', hand: [8] },
+    c: { id: 'c', name: 'Charlie', hand: [] },
+    d: { id: 'd', name: 'Delta', hand: [3, 11] },
+  };
+
+  const discarded = previewLowestCardPerPlayer(players);
+
+  assert.deepEqual(discarded, [
+    { card: 2, playerId: 'a', playerName: 'Alpha' },
+    { card: 3, playerId: 'd', playerName: 'Delta' },
+    { card: 8, playerId: 'b', playerName: 'Bravo' },
+  ]);
+  assert.deepEqual(players, {
+    a: { id: 'a', name: 'Alpha', hand: [9, 2, 5] },
+    b: { id: 'b', name: 'Bravo', hand: [8] },
+    c: { id: 'c', name: 'Charlie', hand: [] },
+    d: { id: 'd', name: 'Delta', hand: [3, 11] },
+  });
+});
+
+test('applyStarDiscardPreview removes only the planned cards after star overlay ends', () => {
+  const players = {
+    a: { id: 'a', name: 'Alpha', hand: [9, 2, 5] },
+    b: { id: 'b', name: 'Bravo', hand: [8] },
+    c: { id: 'c', name: 'Charlie', hand: [] },
+    d: { id: 'd', name: 'Delta', hand: [3, 11] },
+  };
+
+  applyStarDiscardPreview(players, [
+    { card: 2, playerId: 'a', playerName: 'Alpha' },
+    { card: 3, playerId: 'd', playerName: 'Delta' },
+    { card: 8, playerId: 'b', playerName: 'Bravo' },
+  ]);
+
   assert.deepEqual(players, {
     a: { id: 'a', name: 'Alpha', hand: [9, 5] },
     b: { id: 'b', name: 'Bravo', hand: [] },
