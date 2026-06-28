@@ -19,6 +19,7 @@ import {
 } from './roomSync.js';
 import {
   findMyStarDiscard,
+  getStarProposalButtons,
   starDiscardLaunchDelayMs,
   type StarDiscardPreview,
 } from './starUi.js';
@@ -28,8 +29,6 @@ import { levelCompleteOverlayDelayMs } from './levelFlow.js';
 import {
   DEFEAT_SUBTITLE,
   INFO_MESSAGE_DURATION_MS,
-  STAR_PROPOSAL_SUBTITLE,
-  STAR_WAITING_SUBTITLE,
   VICTORY_SUBTITLE,
   overlayDurationMs,
   overlaySubtitle,
@@ -1487,7 +1486,7 @@ export function App() {
   const isHost = room?.hostId === playerId;
   const isPlaying = game?.phase === 'playing';
   const hasStarProposal = !!game?.starProposal;
-  const alreadyAcceptedStar = !!game?.starProposal?.acceptedBy.includes(playerId);
+  const isStarProposalInitiator = game?.starProposal?.initiatorId === playerId;
   const activeInteractionLock = game && isInteractionLockActive(game.interactionLock) ? game.interactionLock : null;
 
   const minPlayableCard = hand.length > 0 ? Math.min(...hand) : null;
@@ -1521,8 +1520,16 @@ export function App() {
   const showNotReady = Boolean(unreadyAction?.visible);
   const showStart = Boolean(startAction?.visible);
   const showPause = Boolean(pauseAction?.visible);
-  const showProposeStar = Boolean(proposeStarAction?.visible);
-  const showAcceptStar = Boolean(acceptStarAction?.visible);
+  const starProposalButtons = getStarProposalButtons({
+    hasProposal: hasStarProposal,
+    isInitiator: Boolean(isStarProposalInitiator),
+    canPropose: Boolean(proposeStarAction?.visible),
+    canRespond: Boolean(acceptStarAction?.visible),
+  });
+  const showProposeStar = starProposalButtons.includes('propose');
+  const showCancelStar = starProposalButtons.includes('cancel');
+  const showAcceptStar = starProposalButtons.includes('accept');
+  const showRejectStar = starProposalButtons.includes('reject');
   const showRoundClearingPlaceholder = Boolean(game && (game.phase === 'playing' || game.phase === 'paused') && isMeRoundOut);
   const showHivePlaceholder = Boolean(
     game && (game.phase === 'focus' || activeInteractionLock?.reason === 'dealing' || isCountdownLockActive(activeInteractionLock)),
@@ -1535,7 +1542,9 @@ export function App() {
     !showStart &&
     !showPause &&
     !showProposeStar &&
-    !showAcceptStar;
+    !showCancelStar &&
+    !showAcceptStar &&
+    !showRejectStar;
   const currentReward = game ? rewardLabel(game.currentLevel) : 'No reward';
   const currentRewardType = game ? REWARDS[game.currentLevel] ?? null : null;
   const dealtCards = useMemo(() => hand.slice(0, dealtHandCount), [hand, dealtHandCount]);
@@ -1607,6 +1616,36 @@ export function App() {
     return () => window.cancelAnimationFrame(frame);
   }, [handLayout.cardSlotMap, handLayout.slotOrder, room?.game?.phase]);
   const baseCommandActions = [
+    showCancelStar
+      ? {
+          key: 'cancel-star',
+          label: 'Retirar propuesta',
+          icon: 'star',
+          className: 'command-button star full-span',
+          onClick: cancelStarProposal,
+          disabled: !isPlaying || interactionBlocked,
+        }
+      : null,
+    showAcceptStar
+      ? {
+          key: 'accept-star',
+          label: 'Accept star',
+          icon: 'handshake',
+          className: 'command-button pulse',
+          onClick: acceptStar,
+          disabled: !acceptStarAction?.enabled,
+        }
+      : null,
+    showRejectStar
+      ? {
+          key: 'reject-star',
+          label: 'Reject star',
+          icon: 'close',
+          className: 'command-button secondary',
+          onClick: rejectStar,
+          disabled: !isPlaying || interactionBlocked,
+        }
+      : null,
     showProposeStar
       ? {
           key: 'star',
@@ -1617,7 +1656,7 @@ export function App() {
           disabled: !proposeStarAction?.enabled,
         }
       : null,
-    showPause
+    showPause && !showCancelStar && !showAcceptStar && !showRejectStar
       ? {
           key: 'pause',
           label: 'Pause',
@@ -1626,25 +1665,6 @@ export function App() {
           onClick: requestPause,
           disabled: !pauseAction?.enabled,
         }
-      : null,
-    showAcceptStar
-      ? {
-          key: 'accept-star',
-          label: 'Accept activation',
-          icon: 'handshake',
-          className: 'command-button pulse',
-          onClick: acceptStar,
-          disabled: !acceptStarAction?.enabled,
-        }
-      : hasStarProposal && alreadyAcceptedStar && !interactionBlocked
-        ? {
-            key: 'star-waiting',
-            label: 'Waiting for star votes',
-            icon: 'hourglass_top',
-            className: 'command-button secondary full-span',
-            onClick: () => {},
-            disabled: true,
-          }
       : null,
     showStart
       ? {
@@ -1719,12 +1739,6 @@ export function App() {
             },
           ]
         : [];
-  const commandStatusHint = showAcceptStar
-    ? STAR_PROPOSAL_SUBTITLE
-    : hasStarProposal && alreadyAcceptedStar && !interactionBlocked
-      ? STAR_WAITING_SUBTITLE
-      : null;
-
   function saveRoomCode(roomCode: string, inputCode = roomCode) {
     localStorage.setItem(STORAGE_KEYS.lastRoomCode, roomCode);
     setRoomCodeInput(inputCode);
@@ -1927,6 +1941,30 @@ export function App() {
     if (!socket) return;
     socket.emit('star:accept', (response: any) => {
       if (!response?.ok) setError(response?.error ?? 'Could not accept star');
+    });
+  }
+
+  function cancelStarProposal() {
+    setError('');
+    if (!showCancelStar || !isPlaying || interactionBlocked) {
+      setError('Could not cancel star proposal');
+      return;
+    }
+    if (!socket) return;
+    socket.emit('star:cancel', (response: any) => {
+      if (!response?.ok) setError(response?.error ?? 'Could not cancel star proposal');
+    });
+  }
+
+  function rejectStar() {
+    setError('');
+    if (!showRejectStar || !isPlaying || interactionBlocked) {
+      setError('Could not reject star');
+      return;
+    }
+    if (!socket) return;
+    socket.emit('star:reject', (response: any) => {
+      if (!response?.ok) setError(response?.error ?? 'Could not reject star');
     });
   }
 
@@ -2490,7 +2528,6 @@ export function App() {
                     </button>
                   ))}
                 </div>
-                {commandStatusHint && <small className="command-status-hint">{commandStatusHint}</small>}
               </div>
 
               <div className="deck-panel">

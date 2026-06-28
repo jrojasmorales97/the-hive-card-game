@@ -9,6 +9,7 @@ import {
   isPendingStarResolutionComplete,
   type PendingStarResolution,
 } from './starResolution.js';
+import { getRoundResolutionOutcome, shouldResolveAfterErrorOverlay } from './roundResolution.js';
 import {
   ERROR_LOCK_MS,
   LEVEL_COMPLETE_LOCK_MS,
@@ -519,6 +520,28 @@ function countRemainingCards(room: Room): number {
   return Object.values(room.players).reduce((sum, player) => sum + player.hand.length, 0);
 }
 
+function pauseRoundForReady(room: Room, roomCode: string) {
+  if (!room.game || room.game.phase !== 'playing') return;
+
+  room.game.phase = 'paused';
+  Object.values(room.players).forEach((player) => {
+    player.ready = false;
+  });
+  markCpuPlayersReady(room);
+  clearCpuTurn(roomCode);
+}
+
+function finishGameOver(room: Room, roomCode: string, reason: string) {
+  if (!room.game) return;
+
+  finalizeGameResults(room);
+  room.game.phase = 'game-over';
+  clearCpuTurn(roomCode);
+  emitRoomUpdate(roomCode);
+  io.to(roomCode).emit('game:over', { version: room.version, reason });
+  emitGameLog(roomCode, 'game:over', { reason });
+}
+
 function applyLevelReward(room: Room) {
   if (!room.game) return;
 
@@ -709,9 +732,22 @@ function playCardInRoom(room: Room, roomCode: string, player: Player, card: numb
   if (hasLowerCardInAnyHand) {
     room.game.errorCounts[player.id] = (room.game.errorCounts[player.id] ?? 0) + 1;
     resolveErrorAndDiscard(room, card);
+
     setInteractionLock(room, roomCode, 'error', ERROR_LOCK_MS, (latestRoom) => {
       if (!latestRoom.game || latestRoom.game.phase !== 'playing') return;
-      scheduleCpuTurn(roomCode, 0);
+
+      const latestOutcome = getRoundResolutionOutcome(latestRoom.game.lives, countRemainingCards(latestRoom));
+      if (shouldResolveAfterErrorOverlay(latestOutcome)) {
+        if (latestOutcome === 'game-over') {
+          finishGameOver(latestRoom, roomCode, 'No lives left');
+          return;
+        }
+
+        completeLevelOrGame(latestRoom, roomCode);
+        return;
+      }
+
+      pauseRoundForReady(latestRoom, roomCode);
     });
     io.to(roomCode).emit('game:error-penalty', {
       version: nextFunctionalVersion(room),
@@ -730,19 +766,19 @@ function playCardInRoom(room: Room, roomCode: string, player: Player, card: numb
         playerName: discard.playerName,
       });
     });
-  }
 
-  if (room.game.lives <= 0) {
-    finalizeGameResults(room);
-    room.game.phase = 'game-over';
-    clearCpuTurn(roomCode);
     emitRoomUpdate(roomCode);
-    io.to(roomCode).emit('game:over', { version: room.version, reason: 'No lives left' });
-    emitGameLog(roomCode, 'game:over', { reason: 'No lives left' });
     return { ok: true };
   }
 
-  if (countRemainingCards(room) === 0) {
+  const resolutionOutcome = getRoundResolutionOutcome(room.game.lives, countRemainingCards(room));
+
+  if (resolutionOutcome === 'game-over') {
+    finishGameOver(room, roomCode, 'No lives left');
+    return { ok: true };
+  }
+
+  if (resolutionOutcome === 'level-complete') {
     clearCpuTurn(roomCode);
     scheduleLevelCompletionAfterRoundOut(room, roomCode);
     emitRoomUpdate(roomCode);
@@ -750,7 +786,9 @@ function playCardInRoom(room: Room, roomCode: string, player: Player, card: numb
   }
 
   emitRoomUpdate(roomCode);
-  if (!hasLowerCardInAnyHand) scheduleCpuTurn(roomCode, 0);
+  if (hasLowerCardInAnyHand) return { ok: true };
+
+  scheduleCpuTurn(roomCode, 0);
   return { ok: true };
 }
 
@@ -833,9 +871,11 @@ function resolveStarIfEveryoneAccepted(room: Room, roomCode: string): boolean {
     if (!latestRoom.game || latestRoom.game.phase !== 'playing') return;
 
     if (pendingStarResolutions.has(roomCode)) settlePendingStarResolution(latestRoom, roomCode);
-    if (countRemainingCards(latestRoom) === 0) return;
+    if (!latestRoom.game || latestRoom.game.phase !== 'playing') return;
 
-    scheduleCpuTurn(roomCode, 0);
+    if (getRoundResolutionOutcome(latestRoom.game.lives, countRemainingCards(latestRoom)) === 'pause') {
+      pauseRoundForReady(latestRoom, roomCode);
+    }
   });
   io.to(roomCode).emit('game:star-used', {
     version: nextFunctionalVersion(room),
@@ -1535,6 +1575,72 @@ io.on('connection', (socket) => {
     }
 
     emitRoomUpdate(ctx.roomCode);
+    ack?.({ ok: true });
+  });
+
+  socket.on('star:cancel', (ack?: (response: unknown) => void) => {
+    const ctx = getSocketContext(socket.id);
+    if (!ctx || !ctx.room.game || !ctx.room.game.starProposal) {
+      ack?.({ ok: false, error: 'There is no active star proposal' });
+      return;
+    }
+
+    if (ctx.room.game.phase !== 'playing') {
+      ack?.({ ok: false, error: 'You can only cancel a star during active play' });
+      return;
+    }
+
+    if (hasActiveInteractionLock(ctx.room)) {
+      ack?.({ ok: false, error: 'Wait until the current transition finishes' });
+      return;
+    }
+
+    if (!isActiveRoundParticipant(ctx.room, ctx.player)) {
+      ack?.({ ok: false, error: 'You already finished your cards this round' });
+      return;
+    }
+
+    if (ctx.room.game.starProposal.initiatorId !== ctx.playerId) {
+      ack?.({ ok: false, error: 'Only the proposing player can cancel the star' });
+      return;
+    }
+
+    ctx.room.game.starProposal = null;
+    emitRoomUpdate(ctx.roomCode);
+    scheduleCpuTurn(ctx.roomCode, 0);
+    ack?.({ ok: true });
+  });
+
+  socket.on('star:reject', (ack?: (response: unknown) => void) => {
+    const ctx = getSocketContext(socket.id);
+    if (!ctx || !ctx.room.game || !ctx.room.game.starProposal) {
+      ack?.({ ok: false, error: 'There is no active star proposal' });
+      return;
+    }
+
+    if (ctx.room.game.phase !== 'playing') {
+      ack?.({ ok: false, error: 'You can only reject a star during active play' });
+      return;
+    }
+
+    if (hasActiveInteractionLock(ctx.room)) {
+      ack?.({ ok: false, error: 'Wait until the current transition finishes' });
+      return;
+    }
+
+    if (!isActiveRoundParticipant(ctx.room, ctx.player)) {
+      ack?.({ ok: false, error: 'You already finished your cards this round' });
+      return;
+    }
+
+    if (ctx.room.game.starProposal.initiatorId === ctx.playerId) {
+      ack?.({ ok: false, error: 'The proposing player must cancel the star directly' });
+      return;
+    }
+
+    ctx.room.game.starProposal = null;
+    emitRoomUpdate(ctx.roomCode);
+    scheduleCpuTurn(ctx.roomCode, 0);
     ack?.({ ok: true });
   });
 

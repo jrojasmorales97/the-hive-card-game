@@ -4,6 +4,8 @@ export type StarDiscardPreview = {
   playerName: string;
 };
 
+export type StarProposalButton = 'propose' | 'cancel' | 'accept' | 'reject';
+
 export function findMyStarDiscard(discarded: StarDiscardPreview[] | null | undefined, playerId: string): number | null {
   return discarded?.find((entry) => entry.playerId === playerId)?.card ?? null;
 }
@@ -21,4 +23,20 @@ export function shouldUseTwoColumnStarDiscardLayout(discardCount: number, player
 export function starDiscardLaunchDelayMs(blockingUntil: number | null, now = Date.now()): number {
   if (blockingUntil === null) return 0;
   return Math.max(0, blockingUntil - now);
+}
+
+export function getStarProposalButtons({
+  hasProposal,
+  isInitiator,
+  canPropose,
+  canRespond,
+}: {
+  hasProposal: boolean;
+  isInitiator: boolean;
+  canPropose: boolean;
+  canRespond: boolean;
+}): StarProposalButton[] {
+  if (!hasProposal) return canPropose ? ['propose'] : [];
+  if (isInitiator) return ['cancel'];
+  return canRespond ? ['accept', 'reject'] : [];
 }

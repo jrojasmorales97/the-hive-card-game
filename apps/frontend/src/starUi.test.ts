@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   findMyStarDiscard,
+  getStarProposalButtons,
   mergeHandWithStarDiscard,
   starDiscardLaunchDelayMs,
   shouldUseTwoColumnStarDiscardLayout,
@@ -39,4 +40,33 @@ test('starDiscardLaunchDelayMs waits until the star overlay finishes before laun
   assert.equal(starDiscardLaunchDelayMs(4200, 1000), 3200);
   assert.equal(starDiscardLaunchDelayMs(800, 1000), 0);
   assert.equal(starDiscardLaunchDelayMs(null, 1000), 0);
+});
+
+test('getStarProposalButtons only shows propose when there is no active proposal', () => {
+  assert.deepEqual(
+    getStarProposalButtons({ hasProposal: false, isInitiator: false, canPropose: true, canRespond: false }),
+    ['propose'],
+  );
+  assert.deepEqual(
+    getStarProposalButtons({ hasProposal: false, isInitiator: false, canPropose: false, canRespond: false }),
+    [],
+  );
+});
+
+test('getStarProposalButtons gives the proposer a single cancel button', () => {
+  assert.deepEqual(
+    getStarProposalButtons({ hasProposal: true, isInitiator: true, canPropose: false, canRespond: true }),
+    ['cancel'],
+  );
+});
+
+test('getStarProposalButtons gives other players only accept and reject', () => {
+  assert.deepEqual(
+    getStarProposalButtons({ hasProposal: true, isInitiator: false, canPropose: false, canRespond: true }),
+    ['accept', 'reject'],
+  );
+  assert.deepEqual(
+    getStarProposalButtons({ hasProposal: true, isInitiator: false, canPropose: false, canRespond: false }),
+    [],
+  );
 });
