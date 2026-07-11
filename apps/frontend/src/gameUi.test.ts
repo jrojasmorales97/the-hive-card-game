@@ -3,10 +3,13 @@ import assert from 'node:assert/strict';
 
 import {
   countdownValueFromRemaining,
+  handDealAnimationMode,
+  handDealStateKey,
   isCountdownLockActive,
   isHandDealInProgress,
   isInteractionLockActive,
   isReadyLocked,
+  lobbyStartDealDelayMs,
 } from './gameUi.js';
 
 test('interaction lock stays active until its deadline', () => {
@@ -40,9 +43,53 @@ test('ready remains blocked for any active authoritative transition lock', () =>
   assert.equal(isReadyLocked({ reason: 'countdown', until: 1000 }, 1000), false);
 });
 
+test('handDealStateKey changes when the room leaves the lobby even if hand and phase stay the same', () => {
+  assert.notEqual(
+    handDealStateKey({ handKey: '7', roomStatus: 'lobby', phase: 'focus' }),
+    handDealStateKey({ handKey: '7', roomStatus: 'in-game', phase: 'focus' }),
+  );
+});
+
+test('handDealAnimationMode only animates real in-game focus hands', () => {
+  assert.equal(handDealAnimationMode({ handLength: 0, roomStatus: 'in-game', phase: 'focus' }), 'clear');
+  assert.equal(handDealAnimationMode({ handLength: 1, roomStatus: 'in-game', phase: 'focus' }), 'animate');
+  assert.equal(handDealAnimationMode({ handLength: 1, roomStatus: 'lobby', phase: 'focus' }), 'reveal');
+  assert.equal(handDealAnimationMode({ handLength: 1, roomStatus: 'in-game', phase: 'playing' }), 'reveal');
+});
+
 test('countdown values match remaining time windows', () => {
   assert.equal(countdownValueFromRemaining(3000), 3);
   assert.equal(countdownValueFromRemaining(1500), 2);
   assert.equal(countdownValueFromRemaining(500), 1);
   assert.equal(countdownValueFromRemaining(0), null);
+});
+
+test('lobbyStartDealDelayMs keeps the first in-game deal immediate', () => {
+  assert.equal(
+    lobbyStartDealDelayMs({
+      previousRoomStatus: 'lobby',
+      nextRoomStatus: 'in-game',
+      nextPhase: 'focus',
+    }),
+    0,
+  );
+
+  assert.equal(
+    lobbyStartDealDelayMs({
+      previousRoomStatus: null,
+      nextRoomStatus: 'in-game',
+      nextPhase: 'focus',
+    }),
+    0,
+  );
+
+  assert.equal(
+    lobbyStartDealDelayMs({
+      previousRoomStatus: 'lobby',
+      nextRoomStatus: 'in-game',
+      nextPhase: 'focus',
+      forceRevealHand: true,
+    }),
+    0,
+  );
 });

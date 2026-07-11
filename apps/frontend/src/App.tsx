@@ -4,9 +4,12 @@ import { io, Socket } from 'socket.io-client';
 import { deriveConnectionState, RESYNC_INTERVAL_MS, RESYNC_TIMEOUT_MS, type ConnectionState } from './connectionStatus.js';
 import {
   countdownValueFromRemaining,
+  handDealAnimationMode,
+  handDealStateKey,
   isCountdownLockActive,
   isHandDealInProgress,
   isInteractionLockActive,
+  lobbyStartDealDelayMs,
 } from './gameUi.js';
 import {
   applyPrivateFragment,
@@ -26,6 +29,8 @@ import {
 import { buildHandLayout, buildHandSlotPath, type HandSlotId } from './handLayout.js';
 import { podiumToneForRank, shouldUseTwoColumnFinalScoreLayout, timingFeedbackForBand } from './finalScoreUi.js';
 import { levelCompleteOverlayDelayMs } from './levelFlow.js';
+import { buildLobbySeats, shouldShowTopbarRoomCode, waitingRoomMessage } from './lobbyUi.js';
+import logoUrl from '../the-hive-logo.png';
 import {
   DEFEAT_SUBTITLE,
   INFO_MESSAGE_DURATION_MS,
@@ -199,6 +204,7 @@ const RIVAL_POSITIONS = [
   'corner-right-center',
 ] as const;
 const SELF_POSITION = 'corner-bottom-right' as const;
+const MAX_LOBBY_PLAYERS = 8;
 
 const REWARDS: Record<number, 'life' | 'star'> = {
   2: 'star',
@@ -541,13 +547,27 @@ function RulesPanels() {
   );
 }
 
-function HeroTitle() {
+function MainBrandMark({ heading = false, className = '' }: { heading?: boolean; className?: string }) {
+  const brandClassName = `hero-title brand-mark brand-mark-main${className ? ` ${className}` : ''}`;
+  const image = <img className="brand-logo-img" src={logoUrl} alt={heading ? 'The Hive' : ''} />;
+
+  if (heading) {
+    return <h1 className={brandClassName}>{image}</h1>;
+  }
+
   return (
-    <h1 className="hero-title">
-      <span className="hero-title-the">The</span>
-      {' '}
-      <span className="hero-title-hive">Hive</span>
-    </h1>
+    <div className={brandClassName} aria-hidden>
+      {image}
+    </div>
+  );
+}
+
+function TableBrandMark() {
+  return (
+    <div className="brand-mark brand-mark-table" aria-hidden>
+      <img className="brand-watermark-img brand-watermark-img-top" src={logoUrl} alt="" />
+      <img className="brand-watermark-img brand-watermark-img-bottom" src={logoUrl} alt="" />
+    </div>
   );
 }
 
@@ -605,7 +625,7 @@ function HeroSection() {
   return (
     <div className="hero">
       <div className="hero-inner">
-        <HeroTitle />
+        <MainBrandMark heading />
         <p className="hero-tagline">No talking | No signaling | In order</p>
       </div>
     </div>
@@ -643,9 +663,10 @@ export function App() {
   const levelCompleteOverlayTimeoutRef = useRef<number | null>(null);
   const pileClearStartTimeoutRef = useRef<number | null>(null);
   const starDiscardLaunchTimeoutRef = useRef<number | null>(null);
+  const dealStartTimeoutRef = useRef<number | null>(null);
   const dealIntervalRef = useRef<number | null>(null);
-  const previousHandKeyRef = useRef('');
-  const previousHandPhaseRef = useRef<GamePhase | null>(null);
+  const pendingLobbyDealDelayMsRef = useRef(0);
+  const previousHandDealStateKeyRef = useRef('');
   const roomRef = useRef<RoomState | null>(null);
   const playerNameRef = useRef('');
   const manualAccessRef = useRef(false);
@@ -732,6 +753,12 @@ export function App() {
 
   function commitAppliedSnapshot(snapshot: RoomSnapshot, opts?: { forceRevealHand?: boolean; clientSentAt?: number }) {
     applyClockSample(snapshot.serverTime, opts?.clientSentAt);
+    pendingLobbyDealDelayMsRef.current = lobbyStartDealDelayMs({
+      previousRoomStatus: roomRef.current?.status ?? null,
+      nextRoomStatus: snapshot.publicState.status,
+      nextPhase: snapshot.publicState.game?.phase ?? null,
+      forceRevealHand: opts?.forceRevealHand,
+    });
     setRoom(snapshot.publicState);
     setHand(snapshot.privateState.hand ?? []);
     setAvailableActions(snapshot.privateState.availableActions ?? []);
@@ -743,8 +770,11 @@ export function App() {
       }
 
       setDealtHandCount(snapshot.privateState.hand.length);
-      previousHandKeyRef.current = snapshot.privateState.hand.join(',');
-      previousHandPhaseRef.current = snapshot.publicState.game?.phase ?? null;
+      previousHandDealStateKeyRef.current = handDealStateKey({
+        handKey: snapshot.privateState.hand.join(','),
+        roomStatus: snapshot.publicState.status,
+        phase: snapshot.publicState.game?.phase ?? null,
+      });
     }
 
     syncHealthyRef.current = true;
@@ -969,7 +999,6 @@ export function App() {
         }
 
         if (response.snapshot) applyAuthoritativeSnapshot(response.snapshot, { clientSentAt: joinSentAt });
-        setInfo(response.reconnected ? 'Reconnected to room.' : 'Session restored.');
 
         const resyncSentAt = Date.now();
         s.emit('room:resync', (syncResponse: any) => {
@@ -1053,6 +1082,15 @@ export function App() {
       applyPrivateStateFragment(payload);
     });
 
+    s.on('room:kicked', (payload: { message?: string }) => {
+      localStorage.removeItem(STORAGE_KEYS.lastRoomCode);
+      skipNextAutoJoinRef.current = true;
+      clearRoomState();
+      setRoomCodeInput('');
+      setAccessTab('join');
+      setError(payload?.message ?? 'The host removed you from the room.');
+    });
+
     s.on(
       'game:error-penalty',
       (payload: {
@@ -1076,8 +1114,6 @@ export function App() {
 
     s.on('game:paused', (payload: { version?: number; message?: string }) => {
       if (!shouldApplyDecorativeEvent(payload?.version, snapshotCorrelationRef.current.lastAppliedVersion)) return;
-      const msg = payload?.message ?? pickMessage(MSG.paused, Date.now());
-      setInfo(msg);
       showEventOverlay(
         {
           kind: 'pause',
@@ -1091,10 +1127,8 @@ export function App() {
 
     s.on('game:star-used', (payload: StarUsedPayload & { version?: number }) => {
       if (!shouldApplyDecorativeEvent(payload?.version, snapshotCorrelationRef.current.lastAppliedVersion)) return;
-      const msg = payload?.message ?? pickMessage(MSG.starUsed, Date.now());
       const localDiscardCard = findMyStarDiscard(payload?.discarded ?? [], playerId);
       if (localDiscardCard !== null) setPendingLocalStarDiscardCard(localDiscardCard);
-      setInfo(msg);
       showEventOverlay(
         {
           kind: 'star-used',
@@ -1113,13 +1147,11 @@ export function App() {
 
     s.on('game:next-level-ready', (payload: { version?: number }) => {
       if (!shouldApplyDecorativeEvent(payload?.version, snapshotCorrelationRef.current.lastAppliedVersion)) return;
-      setInfo('New hand dealt. Ready up when the table settles.');
+      // ready state handled via room:update
     });
 
     s.on('game:restarted', (payload: { version?: number; message?: string }) => {
       if (!shouldApplyDecorativeEvent(payload?.version, snapshotCorrelationRef.current.lastAppliedVersion)) return;
-      const msg = payload?.message ?? 'Game restarted in the same room.';
-      setInfo(msg);
       showEventOverlay(
         {
           kind: 'restarted',
@@ -1135,8 +1167,6 @@ export function App() {
       if (!shouldApplyDecorativeEvent(payload?.version, snapshotCorrelationRef.current.lastAppliedVersion)) return;
       setEventOverlay(null);
       eventOverlayEndsAtRef.current = null;
-      const msg = pickMessage(MSG.defeat, Date.now());
-      setInfo(msg);
     });
 
     resyncIntervalRef.current = window.setInterval(() => {
@@ -1219,47 +1249,73 @@ export function App() {
 
   useEffect(() => {
     const handKey = hand.join(',');
+    const roomStatus = room?.status ?? null;
     const phase = room?.game?.phase ?? null;
+    const currentDealStateKey = handDealStateKey({ handKey, roomStatus, phase });
 
-    if (handKey === previousHandKeyRef.current && phase === previousHandPhaseRef.current) {
+    if (currentDealStateKey === previousHandDealStateKeyRef.current) {
       return;
     }
-    previousHandKeyRef.current = handKey;
-    previousHandPhaseRef.current = phase;
+    previousHandDealStateKeyRef.current = currentDealStateKey;
+
+    if (dealStartTimeoutRef.current) {
+      window.clearTimeout(dealStartTimeoutRef.current);
+      dealStartTimeoutRef.current = null;
+    }
 
     if (dealIntervalRef.current) {
       window.clearInterval(dealIntervalRef.current);
       dealIntervalRef.current = null;
     }
 
-    if (!hand.length) {
+    const animationMode = handDealAnimationMode({ handLength: hand.length, roomStatus, phase });
+
+    if (animationMode === 'clear') {
       setDealtHandCount(0);
       return;
     }
 
-    if (phase !== 'focus') {
+    if (animationMode === 'reveal') {
+      pendingLobbyDealDelayMsRef.current = 0;
       setDealtHandCount(hand.length);
       return;
     }
 
-    setDealtHandCount(0);
-    let current = 0;
-    dealIntervalRef.current = window.setInterval(() => {
-      current += 1;
-      setDealtHandCount(current);
-      if (current >= hand.length && dealIntervalRef.current) {
-        window.clearInterval(dealIntervalRef.current);
-        dealIntervalRef.current = null;
-      }
-    }, 460);
+    const startDeal = () => {
+      setDealtHandCount(0);
+      let current = 0;
+      dealIntervalRef.current = window.setInterval(() => {
+        current += 1;
+        setDealtHandCount(current);
+        if (current >= hand.length && dealIntervalRef.current) {
+          window.clearInterval(dealIntervalRef.current);
+          dealIntervalRef.current = null;
+        }
+      }, 460);
+    };
+
+    const delayMs = pendingLobbyDealDelayMsRef.current;
+    pendingLobbyDealDelayMsRef.current = 0;
+    if (delayMs > 0) {
+      dealStartTimeoutRef.current = window.setTimeout(() => {
+        dealStartTimeoutRef.current = null;
+        startDeal();
+      }, delayMs);
+    } else {
+      startDeal();
+    }
 
     return () => {
+      if (dealStartTimeoutRef.current) {
+        window.clearTimeout(dealStartTimeoutRef.current);
+        dealStartTimeoutRef.current = null;
+      }
       if (dealIntervalRef.current) {
         window.clearInterval(dealIntervalRef.current);
         dealIntervalRef.current = null;
       }
     };
-  }, [hand, room?.game?.phase]);
+  }, [hand, room?.status, room?.game?.phase]);
 
   useEffect(() => {
     if (hiddenStarDiscardCard === null || hand.includes(hiddenStarDiscardCard)) return;
@@ -1484,6 +1540,7 @@ export function App() {
   );
 
   const isHost = room?.hostId === playerId;
+  const isLobbyRoom = room?.status === 'lobby';
   const isPlaying = game?.phase === 'playing';
   const hasStarProposal = !!game?.starProposal;
   const isStarProposalInitiator = game?.starProposal?.initiatorId === playerId;
@@ -1501,7 +1558,7 @@ export function App() {
   const pauseAction = actionFor('pause');
   const proposeStarAction = actionFor('propose_star');
   const acceptStarAction = actionFor('accept_star');
-  const readyOverlayBlocked = eventOverlay?.kind === 'level-complete' || eventOverlay?.kind === 'pause';
+  const readyOverlayBlocked = eventOverlay?.kind === 'level-complete';
   const prepLabel =
     activeInteractionLock?.reason === 'dealing'
       ? 'The hive is dealing the next pulse'
@@ -1557,6 +1614,8 @@ export function App() {
   const queueBottomRow = handLayout.bottomRow;
   const finalResults = game?.finalResults ?? [];
   const showTwoColumnFinalScoreLayout = shouldUseTwoColumnFinalScoreLayout(finalResults.length);
+  const hostPlayer = room?.players.find((player) => player.id === room.hostId) ?? null;
+  const lobbySeats = useMemo(() => buildLobbySeats(room?.players ?? [], MAX_LOBBY_PLAYERS), [room?.players]);
   const queueCardStyle = (slotId: HandSlotId, card: number | null) => {
     const slotIndex = Math.max(0, handLayout.slotOrder.indexOf(slotId) - 1);
     return {
@@ -1756,6 +1815,15 @@ export function App() {
       window.clearTimeout(starDiscardLaunchTimeoutRef.current);
       starDiscardLaunchTimeoutRef.current = null;
     }
+    if (dealStartTimeoutRef.current) {
+      window.clearTimeout(dealStartTimeoutRef.current);
+      dealStartTimeoutRef.current = null;
+    }
+    if (dealIntervalRef.current) {
+      window.clearInterval(dealIntervalRef.current);
+      dealIntervalRef.current = null;
+    }
+    pendingLobbyDealDelayMsRef.current = 0;
     eventOverlayEndsAtRef.current = null;
     setGameLog([]);
     setLogOpen(false);
@@ -1847,7 +1915,7 @@ export function App() {
     if (response.snapshot?.publicState) {
       saveRoomCode(response.snapshot.publicState.code, response.snapshot.publicState.displayCode ?? response.snapshot.publicState.code);
     }
-    setInfo(response.reconnected ? 'Reconnected to room' : 'Joined room');
+
   }
 
   function setReady(ready: boolean) {
@@ -1866,6 +1934,10 @@ export function App() {
   function startGame() {
     setError('');
     setInfo('');
+    if (!startAction?.enabled) {
+      setError(startAction?.reason ?? 'Could not start game');
+      return;
+    }
     if (!socket) return;
     socket.emit('game:start', (response: any) => {
       if (!response?.ok) {
@@ -2018,7 +2090,6 @@ export function App() {
     skipNextAutoJoinRef.current = true;
     const ok = await leaveRoom();
     if (!ok) return;
-    setInfo('You left the room.');
   }
 
   function requestAbandonMatch() {
@@ -2057,12 +2128,22 @@ export function App() {
     }
   }
 
+  async function copyLobbyRoomCode() {
+    if (!room?.code || room.shareable === false) return;
+
+    try {
+      await navigator.clipboard.writeText(buildShareUrl(room.code));
+    } catch {
+      setError('Could not copy room code');
+    }
+  }
+
   return (
     <main className="table-page">
       <AppBackground />
       <header className="topbar">
         <div className="topbar-left">
-          {room && (
+          {room && shouldShowTopbarRoomCode(room.status) && (
             <button
               className={`topbar-pill room-pill${room.shareable === false ? ' is-private' : ''}`}
               onClick={copyRoomLink}
@@ -2085,23 +2166,40 @@ export function App() {
         </div>
         {room && (
           <div className="topbar-right">
-            <button
-              className={`topbar-pill${logOpen ? ' active' : ''}`}
-              onClick={() => setLogOpen((current) => !current)}
-              aria-expanded={logOpen}
-              aria-controls="game-log-drawer"
-              title="Toggle game log"
-            >
-              <span className="material-symbols-rounded" aria-hidden>notes</span>
-              Log
-            </button>
-            <button className="topbar-pill topbar-exit-pill" onClick={requestAbandonMatch} title="Leave room" aria-label="Leave room">
-              <span className="material-symbols-rounded" aria-hidden>logout</span>
-              Exit
-            </button>
+            {room.status === 'in-game' && (
+              <button
+                className={`topbar-pill${logOpen ? ' active' : ''}`}
+                onClick={() => setLogOpen((current) => !current)}
+                aria-expanded={logOpen}
+                aria-controls="game-log-drawer"
+                title="Toggle game log"
+              >
+                <span className="material-symbols-rounded" aria-hidden>notes</span>
+                Log
+              </button>
+            )}
+            {room.status !== 'lobby' && (
+              <button className="topbar-pill topbar-exit-pill" onClick={requestAbandonMatch} title="Leave room" aria-label="Leave room">
+                <span className="material-symbols-rounded" aria-hidden>logout</span>
+                Exit
+              </button>
+            )}
           </div>
         )}
       </header>
+
+      {(error || info) && (
+        <section
+          className={`panel status-banner${error ? ' is-error' : ' is-info'}`}
+          role={error ? 'alert' : 'status'}
+          aria-live="polite"
+        >
+          <span className="material-symbols-rounded" aria-hidden>
+            {error ? 'warning' : 'info'}
+          </span>
+          <span>{error || info}</span>
+        </section>
+      )}
 
       {!room && (
         <div className="lobby-scroll">
@@ -2185,10 +2283,99 @@ export function App() {
         </div>
       )}
 
-      {room && (
+      {room && isLobbyRoom && (
+        <div className="lobby-scroll room-waiting-scroll">
+          <div className="room-waiting-stack">
+            <MainBrandMark className="waiting-room-brand" />
+            <section className="panel waiting-room-panel">
+              <div className="waiting-room-shell">
+                <div className="lobby-pill-row">
+                  <button className="topbar-pill topbar-exit-pill" onClick={requestAbandonMatch} title="Leave room" aria-label="Leave room">
+                    <span className="material-symbols-rounded" aria-hidden>logout</span>
+                    Exit
+                  </button>
+                  <button
+                    className={`topbar-pill room-pill${room.shareable === false ? ' is-private' : ''}`}
+                    onClick={() => void copyLobbyRoomCode()}
+                    disabled={room.shareable === false}
+                    title={room.shareable === false ? 'Private CPU room' : 'Copy room code'}
+                  >
+                    <span className="topbar-pill-label">{room.displayCode ?? room.code}</span>
+                    {room.shareable === false ? (
+                      <span className="material-symbols-rounded" aria-hidden>lock</span>
+                    ) : (
+                      <span className="material-symbols-rounded" aria-hidden>content_copy</span>
+                    )}
+                  </button>
+                </div>
+
+                <div className="waiting-room-copy compact">
+                  <p className="waiting-room-eyebrow">Room lobby</p>
+                  <p className="waiting-room-copy-line">{waitingRoomMessage({ isHost, hostName: hostPlayer?.name })}</p>
+                </div>
+
+                <div className="waiting-hive-grid" aria-label="Players in room">
+                  {lobbySeats.map((player, index) => {
+                    if (!player) {
+                      return (
+                        <article key={`empty-seat-${index}`} className="waiting-player-card is-empty" aria-hidden>
+                          <div className="waiting-player-cell">
+                            <span className="material-symbols-rounded waiting-player-icon" aria-hidden>add</span>
+                          </div>
+                        </article>
+                      );
+                    }
+
+                    const playerColor = playerColorMap.get(player.id);
+                    return (
+                      <article
+                        key={player.id}
+                        className={`waiting-player-card${player.id === room.hostId ? ' is-host' : ''}${!player.connected ? ' is-disconnected' : ''}`}
+                        style={{ '--player-border-color': playerColor ?? undefined } as any}
+                      >
+                        <div className="waiting-player-cell">
+                          <span className="material-symbols-rounded waiting-player-icon" aria-hidden>
+                            person
+                          </span>
+                          <div className="waiting-player-body">
+                            <strong
+                              className={`waiting-player-name${player.name.length > 12 ? ' compact' : ''}${player.name.length > 18 ? ' tiny' : ''}`}
+                              style={{ color: playerColor }}
+                            >
+                              {player.name}
+                            </strong>
+                            <div className="waiting-player-head">
+                              {player.isCpu && <span className="waiting-player-badge cpu">CPU</span>}
+                            </div>
+                            {!player.connected && <span className="waiting-player-status">Reconnecting</span>}
+                          </div>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+
+                <div className="waiting-room-footer">
+                  {isHost ? (
+                    <button className="command-button waiting-room-start" onClick={startGame} disabled={!startAction?.enabled}>
+                      Start
+                    </button>
+                  ) : (
+                    <p className="waiting-room-footnote">Host starts the run.</p>
+                  )}
+                </div>
+              </div>
+            </section>
+            <RulesPanels />
+          </div>
+        </div>
+      )}
+
+      {room && !isLobbyRoom && (
         <section className="game-layout">
           <section className="game-shell">
             <section className={`felt-stage${isPlaying ? ' is-playing' : ''}`}>
+              <TableBrandMark />
               {rivals.map((player) => {
                 const cardsRemaining = cardsRemainingForPlayer(player);
                 const isRoundOut = isPlayerRoundOut(player, cardsRemaining);
@@ -2366,23 +2553,6 @@ export function App() {
                         className="overlay-progress-fill"
                         style={{ '--overlay-ms': `${eventOverlay.durationMs ?? 5000}ms` } as any}
                       />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {showExitConfirm && (
-                <div className="modal-backdrop">
-                  <div className="modal-card exit-modal">
-                    <h3>Leave room</h3>
-                    <p>Are you sure you want to leave? You will lose the current game in this room.</p>
-                    <div className="actions centered">
-                      <button className="btn-secondary" onClick={cancelAbandonMatch}>
-                        Cancel
-                      </button>
-                      <button className="btn-danger" onClick={() => void confirmAbandonMatch()}>
-                        Yes, leave
-                      </button>
                     </div>
                   </div>
                 </div>
@@ -2661,6 +2831,27 @@ export function App() {
             </div>
           </aside>
         </section>
+      )}
+
+      {room && showExitConfirm && (
+        <div className="modal-backdrop">
+          <div className="modal-card exit-modal">
+            <h3>Leave room</h3>
+            <p>
+              {isLobbyRoom
+                ? 'Are you sure you want to leave this room?'
+                : 'Are you sure you want to leave? You will lose the current game in this room.'}
+            </p>
+            <div className="actions centered">
+              <button className="btn-secondary" onClick={cancelAbandonMatch}>
+                Cancel
+              </button>
+              <button className="btn-danger" onClick={() => void confirmAbandonMatch()}>
+                Yes, leave
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </main>
   );

@@ -9,7 +9,7 @@ import {
   isPendingStarResolutionComplete,
   type PendingStarResolution,
 } from './starResolution.js';
-import { getRoundResolutionOutcome, shouldResolveAfterErrorOverlay } from './roundResolution.js';
+import { getRoundResolutionOutcome, shouldPauseAfterStarResolution, shouldResolveAfterErrorOverlay } from './roundResolution.js';
 import {
   ERROR_LOCK_MS,
   LEVEL_COMPLETE_LOCK_MS,
@@ -24,6 +24,7 @@ import {
   previewLowestCardPerPlayer,
 } from './gameTiming.js';
 import { nextLevelAdvanceDelayMs, nextLevelReadyLockMs } from './levelFlow.js';
+import { resolveRoomJoin, validateLobbyKickRequest, validateLobbyStartRequest } from './lobbyRules.js';
 
 type Player = {
   id: string;
@@ -411,8 +412,9 @@ function setInteractionLock(
 
     const latestRoom = rooms.get(roomCode);
     if (!latestRoom?.game || latestRoom !== room) return;
-    if (!latestRoom.game.interactionLock) return;
-    if (latestRoom.game.interactionLock.reason !== lock.reason || latestRoom.game.interactionLock.until !== lock.until) return;
+
+    const activeLock = latestRoom.game.interactionLock;
+    if (activeLock && (activeLock.reason !== lock.reason || activeLock.until !== lock.until)) return;
 
     latestRoom.game.interactionLock = null;
     onRelease?.(latestRoom);
@@ -463,10 +465,12 @@ function getActiveRoundParticipants(room: Room): Player[] {
   return Object.values(room.players).filter((player) => isActiveRoundParticipant(room, player));
 }
 
+function countConnectedPlayers(room: Room): number {
+  return Object.values(room.players).filter((player) => player.connected).length;
+}
+
 function canStartGame(room: Room): boolean {
-  const players = Object.values(room.players).filter((player) => player.connected);
-  if (players.length < 2) return false;
-  return players.every((player) => player.ready);
+  return room.status === 'lobby' && !room.game && countConnectedPlayers(room) >= 2;
 }
 
 function hasAllReadyForRound(room: Room): boolean {
@@ -521,7 +525,7 @@ function countRemainingCards(room: Room): number {
 }
 
 function pauseRoundForReady(room: Room, roomCode: string) {
-  if (!room.game || room.game.phase !== 'playing') return;
+  if (!room.game || room.game.phase !== 'playing') return false;
 
   room.game.phase = 'paused';
   Object.values(room.players).forEach((player) => {
@@ -529,6 +533,8 @@ function pauseRoundForReady(room: Room, roomCode: string) {
   });
   markCpuPlayersReady(room);
   clearCpuTurn(roomCode);
+
+  return true;
 }
 
 function finishGameOver(room: Room, roomCode: string, reason: string) {
@@ -873,7 +879,7 @@ function resolveStarIfEveryoneAccepted(room: Room, roomCode: string): boolean {
     if (pendingStarResolutions.has(roomCode)) settlePendingStarResolution(latestRoom, roomCode);
     if (!latestRoom.game || latestRoom.game.phase !== 'playing') return;
 
-    if (getRoundResolutionOutcome(latestRoom.game.lives, countRemainingCards(latestRoom)) === 'pause') {
+    if (shouldPauseAfterStarResolution(getRoundResolutionOutcome(latestRoom.game.lives, countRemainingCards(latestRoom)))) {
       pauseRoundForReady(latestRoom, roomCode);
     }
   });
@@ -1242,6 +1248,15 @@ io.on('connection', (socket) => {
       }
 
       const existingPlayer = room.players[playerId];
+      const joinDecision = resolveRoomJoin({
+        roomStatus: room.status,
+        existingPlayer: Boolean(existingPlayer),
+      });
+      if (!joinDecision.ok) {
+        ack?.({ ok: false, error: joinDecision.error });
+        return;
+      }
+
       if (existingPlayer) {
         if (existingPlayer.socketId && existingPlayer.socketId !== socket.id) {
           socketPlayer.delete(existingPlayer.socketId);
@@ -1273,11 +1288,6 @@ io.on('connection', (socket) => {
           yourId: playerId,
           reconnected: true,
         });
-        return;
-      }
-
-      if (room.status !== 'lobby') {
-        ack?.({ ok: false, error: 'The game already started in this room' });
         return;
       }
 
@@ -1345,13 +1355,6 @@ io.on('connection', (socket) => {
     ctx.player.ready = Boolean(payload?.ready);
     markCpuPlayersReady(ctx.room);
 
-      // Auto-start in the lobby when everyone is ready.
-    if (ctx.room.status === 'lobby' && !ctx.room.game && canStartGame(ctx.room)) {
-      startGameInRoom(ctx.room, ctx.roomCode);
-      ack?.({ ok: true, autoStarted: true });
-      return;
-    }
-
     if (
       ctx.room.game &&
       (ctx.room.game.phase === 'focus' || ctx.room.game.phase === 'paused') &&
@@ -1364,6 +1367,45 @@ io.on('connection', (socket) => {
     ack?.({ ok: true });
   });
 
+  socket.on('room:kick', (payload: { targetPlayerId?: string }, ack?: (response: unknown) => void) => {
+    const ctx = getSocketContext(socket.id);
+    if (!ctx) {
+      ack?.({ ok: false, error: 'You are not in a room' });
+      return;
+    }
+
+    const targetPlayerId = payload?.targetPlayerId?.trim();
+    const decision = validateLobbyKickRequest({
+      isHost: ctx.room.hostId === ctx.playerId,
+      roomStatus: ctx.room.status,
+      actorId: ctx.playerId,
+      targetId: targetPlayerId,
+      targetExists: Boolean(targetPlayerId && ctx.room.players[targetPlayerId]),
+    });
+    if (!decision.ok) {
+      ack?.({ ok: false, error: decision.error });
+      return;
+    }
+
+    const targetPlayer = ctx.room.players[targetPlayerId!];
+    if (targetPlayer.socketId) {
+      io.to(targetPlayer.socketId).emit('room:kicked', {
+        roomCode: ctx.roomCode,
+        message: 'The host removed you from the room.',
+      });
+    }
+
+    emitGameLog(ctx.roomCode, 'room:left', {
+      playerId: targetPlayer.id,
+      playerName: targetPlayer.name,
+      removedByPlayerId: ctx.playerId,
+      removedByPlayerName: ctx.player.name,
+      reason: 'kicked',
+    });
+    removePlayerCompletely(targetPlayer.id);
+    ack?.({ ok: true });
+  });
+
   socket.on('game:start', (ack?: (response: unknown) => void) => {
     const ctx = getSocketContext(socket.id);
     if (!ctx) {
@@ -1371,13 +1413,14 @@ io.on('connection', (socket) => {
       return;
     }
 
-    if (ctx.room.hostId !== ctx.playerId) {
-      ack?.({ ok: false, error: 'Only the host can start the game' });
-      return;
-    }
-
-    if (!canStartGame(ctx.room)) {
-      ack?.({ ok: false, error: 'Everyone must be ready (minimum 2 players)' });
+    const decision = validateLobbyStartRequest({
+      isHost: ctx.room.hostId === ctx.playerId,
+      roomStatus: ctx.room.status,
+      hasGame: Boolean(ctx.room.game),
+      connectedPlayerCount: countConnectedPlayers(ctx.room),
+    });
+    if (!decision.ok) {
+      ack?.({ ok: false, error: decision.error });
       return;
     }
 
@@ -1473,12 +1516,7 @@ io.on('connection', (socket) => {
       return;
     }
 
-    ctx.room.game.phase = 'paused';
-    Object.values(ctx.room.players).forEach((player) => {
-      player.ready = false;
-    });
-    markCpuPlayersReady(ctx.room);
-    clearCpuTurn(ctx.roomCode);
+    pauseRoundForReady(ctx.room, ctx.roomCode);
 
     emitRoomUpdate(ctx.roomCode);
     io.to(ctx.roomCode).emit('game:paused', {

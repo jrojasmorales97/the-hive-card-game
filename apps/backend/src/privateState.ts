@@ -49,8 +49,9 @@ function action(type: PrivateActionType, visible: boolean, enabled: boolean, rea
 }
 
 export function buildPrivateActions(ctx: PrivateActionContext): PrivateAction[] {
-  const readyVisible = !ctx.ready && ((ctx.roomStatus === 'lobby' && ctx.connectedPlayerCount >= 2) || ctx.inRoundReadyWindow);
-  const unreadyVisible = ctx.ready && (ctx.roomStatus === 'lobby' || ctx.inRoundReadyWindow);
+  const readyVisible = !ctx.ready && ctx.inRoundReadyWindow;
+  const unreadyVisible = ctx.ready && ctx.inRoundReadyWindow;
+  const startVisible = ctx.roomStatus === 'lobby' && ctx.isHost;
   const playVisible = ctx.handCount > 0;
   const pauseVisible = ctx.phase === 'playing' && ctx.isActiveRoundParticipant;
   const proposeStarVisible = ctx.phase === 'playing' && ctx.isActiveRoundParticipant;
@@ -66,7 +67,12 @@ export function buildPrivateActions(ctx: PrivateActionContext): PrivateAction[] 
       unreadyVisible && !ctx.interactionLocked,
       unreadyVisible && ctx.interactionLocked ? lockReason : undefined,
     ),
-    action('start', false, false),
+    action(
+      'start',
+      startVisible,
+      startVisible && ctx.canStartGame,
+      startVisible && !ctx.canStartGame ? 'Need at least 2 connected players' : undefined,
+    ),
     action(
       'play_card',
       playVisible,

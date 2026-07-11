@@ -9,3 +9,7 @@ export function getRoundResolutionOutcome(lives: number, remainingCards: number)
 export function shouldResolveAfterErrorOverlay(outcome: RoundResolutionOutcome): boolean {
   return outcome === 'game-over' || outcome === 'level-complete';
 }
+
+export function shouldPauseAfterStarResolution(outcome: RoundResolutionOutcome): boolean {
+  return outcome === 'pause';
+}

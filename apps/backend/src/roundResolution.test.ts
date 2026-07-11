@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { getRoundResolutionOutcome, shouldResolveAfterErrorOverlay } from './roundResolution.js';
+import { getRoundResolutionOutcome, shouldPauseAfterStarResolution, shouldResolveAfterErrorOverlay } from './roundResolution.js';
 
 test('getRoundResolutionOutcome ends the game when no lives remain', () => {
   assert.equal(getRoundResolutionOutcome(0, 4), 'game-over');
@@ -20,4 +20,10 @@ test('shouldResolveAfterErrorOverlay only defers terminal and level-end outcomes
   assert.equal(shouldResolveAfterErrorOverlay('game-over'), true);
   assert.equal(shouldResolveAfterErrorOverlay('level-complete'), true);
   assert.equal(shouldResolveAfterErrorOverlay('pause'), false);
+});
+
+test('shouldPauseAfterStarResolution pauses the room until everyone readies again unless the game is over', () => {
+  assert.equal(shouldPauseAfterStarResolution('pause'), true);
+  assert.equal(shouldPauseAfterStarResolution('level-complete'), false);
+  assert.equal(shouldPauseAfterStarResolution('game-over'), false);
 });

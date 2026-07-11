@@ -7,7 +7,7 @@ function actionState(type: string, actions: ReturnType<typeof buildPrivateAction
   return actions.find((action) => action.type === type);
 }
 
-test('buildPrivateActions exposes ready but hides start during lobby flow', () => {
+test('buildPrivateActions exposes host start in lobby without showing ready toggles', () => {
   const actions = buildPrivateActions({
     roomStatus: 'lobby',
     phase: null,
@@ -15,6 +15,29 @@ test('buildPrivateActions exposes ready but hides start during lobby flow', () =
     ready: false,
     handCount: 0,
     connectedPlayerCount: 2,
+    canStartGame: true,
+    interactionLocked: false,
+    interactionLockReason: null,
+    stars: 1,
+    hasStarProposal: false,
+    alreadyAcceptedStar: false,
+    isActiveRoundParticipant: false,
+    inRoundReadyWindow: false,
+    canRetry: false,
+  });
+
+  assert.deepEqual(actionState('ready', actions), { type: 'ready', visible: false, enabled: false });
+  assert.deepEqual(actionState('start', actions), { type: 'start', visible: true, enabled: true });
+});
+
+test('buildPrivateActions disables lobby start until enough players are connected', () => {
+  const actions = buildPrivateActions({
+    roomStatus: 'lobby',
+    phase: null,
+    isHost: true,
+    ready: false,
+    handCount: 0,
+    connectedPlayerCount: 1,
     canStartGame: false,
     interactionLocked: false,
     interactionLockReason: null,
@@ -26,8 +49,12 @@ test('buildPrivateActions exposes ready but hides start during lobby flow', () =
     canRetry: false,
   });
 
-  assert.deepEqual(actionState('ready', actions), { type: 'ready', visible: true, enabled: true });
-  assert.deepEqual(actionState('start', actions), { type: 'start', visible: false, enabled: false });
+  assert.deepEqual(actionState('start', actions), {
+    type: 'start',
+    visible: true,
+    enabled: false,
+    reason: 'Need at least 2 connected players',
+  });
 });
 
 test('buildPrivateActions blocks ready and unready during authoritative locks', () => {
