@@ -1,7 +1,8 @@
 ---
 description: Implementa planes SDD listos con cambios minimos y verificables.
 mode: subagent
-model: openai/gpt-5.3-codex-spark
+model: openai/gpt-5.6-terra
+variant: high
 variant: high
 permission:
   edit:

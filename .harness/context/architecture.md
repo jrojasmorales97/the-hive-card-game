@@ -98,3 +98,31 @@
 ## Linting
 
 - No aplica: no hay scripts `lint` ni dependencias de ESLint/Prettier declaradas en `apps/backend/package.json` o `apps/frontend/package.json`.
+
+# Contrato realtime baseline
+
+## Entradas, ack y guardas
+
+| Eventos | Payload | Ack y guardas |
+| --- | --- | --- |
+| `room:create`, `room:join` | identidad; join añade `roomCode` | `{ ok, snapshot, room, hand, yourId }`; identidad, sala, aforo y admisión |
+| `room:leave`, `room:resync` | sin payload | `{ ok }` o snapshot; sin contexto: `You are not in a room` |
+| `player:ready`, `room:kick`, `game:start`, `game:retry` | ready, target o vacío | `{ ok, error? }`; lock, host, lobby/fase y participante |
+| `game:play-card`, `game:pause-request` | `{ card }` o vacío | mano, mínimo, fase/lock y participante activo |
+| `star:propose`, `star:accept`, `star:cancel`, `star:reject`, `star:discard-animation-complete` | sin payload | fase, lock, propuesta, iniciador y contexto |
+| `connection`, `disconnect` | Socket.IO | conecta o marca desconectado conservando jugador/mano |
+
+## Emisiones, versiones y privacidad
+
+| Evento | Destino/contenido |
+| --- | --- |
+| `room:update` | sala: `{ version, serverTime, publicState }` |
+| `player:state`, `room:snapshot` | socket propietario; estado privado o combinado |
+| `game:log` | sala; subtipos: room joined/left/reconnected/host-changed; game started/card-played/error/discard/paused/star-proposed/star-accepted/star-used/level-complete/reward/next-level-ready/over/victory/restarted |
+| `room:kicked`, `game:started`, `game:error-penalty`, `game:paused`, `game:star-used`, `game:level-complete`, `game:next-level-ready`, `game:restarted`, `game:over` | socket expulsado o sala; payload específico |
+
+Updates incrementan `version`; sus fragmentos comparten `serverTime`. Resync no incrementa versión; emisiones decorativas usan versión actual o siguiente según handler. `serializeRoom()` solo expone `handCount`, nunca mano o `socketId`; `buildPrivateState()` entrega mano/acciones solo al propietario. Cartas ya jugadas o descartadas son públicas. `rewardMap`, `startedAt`, `errorCounts`, Maps, timers y settlement de estrella son internos.
+
+## Fases, timers, locks y test
+
+Fases: `focus`, `playing`, `paused`, `round-complete`, `level-complete`, `game-over`, `victory`. Locks: `dealing` (`nivel * 460 + 80ms`), `countdown` (3000ms), `error`, `star` y `level-complete` (5000ms); cierre de ronda 520ms + 520ms y CPU 900ms. Ready excluye conectados sin cartas; consenso de estrella los incluye. `index.ts` exporta `startServer`, `stopServer` y `resetServerForTests`; producción conserva `Math.random`, escala 1, `0.0.0.0:$PORT`. Integración Socket.IO usa puerto 0, WebSocket, ack con timeout, RNG sembrado, predicados y cleanup de clientes/timers.

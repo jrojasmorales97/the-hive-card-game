@@ -3,7 +3,7 @@
 ## Contexto funcional
 
 - Documento: `.harness/context/domain.md`
-- Leer cuando: necesites entender el producto, las reglas del juego, los requisitos implementados o pendientes, el glosario funcional o las incertidumbres detectadas a partir de `README.md`, `business.md` y `apps/backend/src/index.ts`.
+- Leer cuando: necesites entender el producto, las reglas del juego, los requisitos implementados o pendientes, el glosario funcional o las incertidumbres detectadas a partir de `README.md` y `apps/backend/src/index.ts`.
 
 ## Contexto tecnico
 
@@ -34,3 +34,12 @@
 3. Lee `.harness/context/architecture.md` para stack, estructura, dependencias, comandos y patrones tecnicos.
 4. Consulta `apps/backend/src/index.ts` para el contrato realtime y la logica autoritativa actual.
 5. Consulta `apps/frontend/src/App.tsx` y los helpers de `apps/frontend/src/` para el comportamiento del cliente.
+
+## Validacion canonica
+
+- `docker compose run --build --rm --no-deps backend npm test`
+- `docker compose run --build --rm --no-deps frontend npm test`
+- `docker compose run --build --rm --no-deps backend npm run test:coverage`
+- `docker compose run --build --rm --no-deps frontend npm run test:coverage`
+- `docker compose run --build --rm --no-deps backend npm run build`
+- `docker compose run --build --rm --no-deps frontend npm run build`

@@ -22,6 +22,12 @@ The Hive es una implementacion web de un juego cooperativo de cartas en tiempo r
 | Desconocido | Mostrar un ranking final de sincronizacion con puntuacion, banda de timing y feedback textual por jugador. | Implementado | `apps/backend/src/finalScoring.ts`, `apps/backend/src/index.ts` (`finalizeGameResults`), `apps/frontend/src/finalScoreUi.ts` |
 | Desconocido | Ofrecer un modo ciego de juego boca abajo con validacion al final del nivel. | Pendiente | `README.md` |
 | Desconocido | Endurecer reglas avanzadas y anadir tests de motor. | Pendiente | `README.md` |
+| 2026-07-18 | Inicio manual por host sin ready previo; contradice README. | Por confirmar | `index.ts` (`game:start`), `lobbyRules.ts` |
+| 2026-07-18 | `availableActions` es consejo UI; handlers siguen siendo autoridad. | Por confirmar | `privateState.ts`, handlers |
+| 2026-07-18 | Desconectados conservan cartas sin TTL; identidad por `playerId` y host migran. | Por confirmar | `markSocketDisconnected`, `room:join`, `pickNextHost` |
+| 2026-07-18 | Balance, ready y consenso usan criterios distintos de registro/conexión/cartas. | Por confirmar | `startGameInRoom`, `roundParticipants.ts`, estrella |
+| 2026-07-18 | Leave en partida, scoring, versiones, estrella tras disconnect y terminales son ambiguos. | Por confirmar | `index.ts` |
+| 2026-07-18 | `room:kick` solo está implementado en backend. | Por confirmar | `index.ts` |
 
 # Funcionalidades
 
@@ -35,6 +41,8 @@ The Hive es una implementacion web de un juego cooperativo de cartas en tiempo r
 - Progresion de niveles: reparto proporcional al nivel, recompensas por mapa fijo, tope de vidas/estrellas, derrota por vidas y victoria al completar `maxLevel`; evidencia en `apps/backend/src/index.ts` (`GAME_BALANCE`, `buildRewardMap`, `completeLevelOrGame`).
 - Ranking final: calculo de desviacion temporal, penalizacion por errores y feedback final por jugador; evidencia en `apps/backend/src/finalScoring.ts` y `apps/frontend/src/finalScoreUi.ts`.
 - Modo dev-cpu: codigos `CPUON1` a `CPUON7` crean salas con CPU auto-ready para pruebas; evidencia en `apps/backend/src/index.ts` (`parseCpuRoomCode`, `createCpuRoom`, `scheduleCpuTurn`).
+- Ready baseline: `game:start` es manual por host; en `focus`/`paused` solo conectados con cartas participan. Sin cartas no bloquea ready pero sí participa en consenso de estrella.
+- Privacidad: broadcasts revelan contadores, pila e historial ya revelado; mano y acciones son privadas. `rewardMap`, `startedAt`, `errorCounts`, Maps, timers y resoluciones pendientes son internos.
 
 # Glosario de terminos
 

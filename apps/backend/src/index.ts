@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { Server } from 'socket.io';
+import { pathToFileURL } from 'node:url';
 import { calculateFinalResults, type FinalPlayerResult } from './finalScoring.js';
 import { buildPrivateActions, type PrivateAction } from './privateState.js';
 import {
@@ -104,7 +105,11 @@ const levelCompleteTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const interactionLockTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const pendingStarResolutions = new Map<string, PendingStarResolution>();
 const starResolutionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const nextLevelTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let logSeq = 0;
+let random = Math.random;
+let timingScale = 1;
+let listening = false;
 
 const MAX_PLAYERS = 8;
 const GAME_BALANCE: Record<number, { maxLevel: number; lives: number }> = {
@@ -126,29 +131,31 @@ const ROUND_OUT_FLIP_MS = 520;
 const ROUND_OUT_UNFLIP_MS = 520;
 const RESTART_BANNER_DELAY_MS = 5000;
 
-const app = Fastify({ logger: true });
+let app: ReturnType<typeof Fastify>;
+let io: Server;
 
-await app.register(cors, {
-  origin: ALLOW_ALL_ORIGINS ? true : CLIENT_ORIGIN,
-  credentials: !ALLOW_ALL_ORIGINS,
-});
-
-app.get('/health', async () => ({ ok: true }));
-
-const server = app.server;
-const io = new Server(server, {
-  cors: {
+async function createTransport(): Promise<void> {
+  app = Fastify({ logger: true });
+  await app.register(cors, {
     origin: ALLOW_ALL_ORIGINS ? true : CLIENT_ORIGIN,
-    methods: ['GET', 'POST'],
     credentials: !ALLOW_ALL_ORIGINS,
-  },
-});
+  });
+  app.get('/health', async () => ({ ok: true }));
+  io = new Server(app.server, {
+    cors: {
+      origin: ALLOW_ALL_ORIGINS ? true : CLIENT_ORIGIN,
+      methods: ['GET', 'POST'],
+      credentials: !ALLOW_ALL_ORIGINS,
+    },
+  });
+  registerSocketHandlers();
+}
 
 function generateRoomCode(length = 6): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code = '';
   for (let i = 0; i < length; i++) {
-    code += chars[Math.floor(Math.random() * chars.length)];
+    code += chars[Math.floor(random() * chars.length)];
   }
   return code;
 }
@@ -333,7 +340,7 @@ function buildRewardMap(maxLevel: number): Record<number, RewardType> {
 function buildDeck(): number[] {
   const deck = Array.from({ length: 100 }, (_, index) => index + 1);
   for (let i = deck.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(random() * (i + 1));
     [deck[i], deck[j]] = [deck[j], deck[i]];
   }
   return deck;
@@ -378,6 +385,18 @@ function clearLevelCompleteTimer(roomCode: string) {
   levelCompleteTimers.delete(roomCode);
 }
 
+function clearNextLevelTimer(roomCode: string) {
+  const timer = nextLevelTimers.get(roomCode);
+  if (!timer) return;
+
+  clearTimeout(timer);
+  nextLevelTimers.delete(roomCode);
+}
+
+function scaledDuration(durationMs: number): number {
+  return Math.max(0, durationMs * timingScale);
+}
+
 function clearInteractionLockTimer(roomCode: string) {
   const timer = interactionLockTimers.get(roomCode);
   if (!timer) return;
@@ -416,7 +435,8 @@ function setInteractionLock(
   if (!room.game) return;
 
   clearInteractionLockTimer(roomCode);
-  const lock = createInteractionLock(reason, durationMs);
+  const scaledDurationMs = scaledDuration(durationMs);
+  const lock = createInteractionLock(reason, scaledDurationMs);
   room.game.interactionLock = lock;
 
   const timer = setTimeout(() => {
@@ -431,7 +451,7 @@ function setInteractionLock(
     latestRoom.game.interactionLock = null;
     onRelease?.(latestRoom);
     emitRoomUpdate(roomCode);
-  }, durationMs);
+  }, scaledDurationMs);
 
   interactionLockTimers.set(roomCode, timer);
 }
@@ -619,7 +639,9 @@ function completeLevelOrGame(room: Room, roomCode: string) {
 
   const nextLevelDelayMs = nextLevelAdvanceDelayMs(room.game.interactionLock);
 
-  setTimeout(() => {
+  clearNextLevelTimer(roomCode);
+  const nextLevelTimer = setTimeout(() => {
+    nextLevelTimers.delete(roomCode);
     const latestRoom = rooms.get(roomCode);
     if (!latestRoom || latestRoom !== room || !latestRoom.game) return;
     if (latestRoom.game.phase !== 'level-complete') return;
@@ -636,6 +658,7 @@ function completeLevelOrGame(room: Room, roomCode: string) {
     io.to(roomCode).emit('game:next-level-ready', { version: latestRoom.version, level: latestRoom.game.currentLevel });
     emitGameLog(roomCode, 'game:next-level-ready', { level: latestRoom.game.currentLevel });
   }, nextLevelDelayMs);
+  nextLevelTimers.set(roomCode, nextLevelTimer);
 }
 
 function scheduleLevelCompletionAfterRoundOut(room: Room, roomCode: string) {
@@ -660,10 +683,10 @@ function scheduleLevelCompletionAfterRoundOut(room: Room, roomCode: string) {
 
       completeLevelOrGame(finalRoom, roomCode);
       emitRoomUpdate(roomCode);
-    }, ROUND_OUT_UNFLIP_MS);
+    }, scaledDuration(ROUND_OUT_UNFLIP_MS));
 
     levelCompleteTimers.set(roomCode, unflipTimer);
-  }, ROUND_OUT_FLIP_MS);
+  }, scaledDuration(ROUND_OUT_FLIP_MS));
 
   levelCompleteTimers.set(roomCode, flipTimer);
 }
@@ -815,7 +838,7 @@ function scheduleCpuTurn(roomCode: string, extraDelayMs = 0) {
     if (!latestLowest?.player.isCpu) return;
 
     playCardInRoom(latestRoom, roomCode, latestLowest.player, latestLowest.card);
-  }, Math.max(0, extraDelayMs) + DEV_CPU_PLAY_DELAY_MS);
+  }, scaledDuration(Math.max(0, extraDelayMs) + DEV_CPU_PLAY_DELAY_MS));
 
   cpuPlayTimers.set(roomCode, timer);
 }
@@ -861,7 +884,7 @@ function resolveStarIfEveryoneAccepted(room: Room, roomCode: string): boolean {
       }
 
       settlePendingStarResolution(latestRoom, roomCode);
-    }, STAR_RESOLUTION_LOCK_MS),
+    }, scaledDuration(STAR_RESOLUTION_LOCK_MS)),
   );
   setInteractionLock(room, roomCode, 'star', STAR_RESOLUTION_LOCK_MS, (latestRoom) => {
     if (!latestRoom.game || latestRoom.game.phase !== 'playing') return;
@@ -995,6 +1018,7 @@ function removePlayerCompletely(playerId: string) {
   if (Object.keys(room.players).length === 0) {
     clearCpuTurn(roomCode);
     clearLevelCompleteTimer(roomCode);
+    clearNextLevelTimer(roomCode);
     clearInteractionLockTimer(roomCode);
     clearPendingStarResolution(roomCode);
     rooms.delete(roomCode);
@@ -1104,7 +1128,8 @@ function resetDevCpuRoomToLobby(room: Room, roomCode: string) {
   if (!isDevCpuRoom(room) || getHumanPlayers(room).length > 0) return;
 
   clearCpuTurn(roomCode);
-  clearLevelCompleteTimer(roomCode);
+    clearLevelCompleteTimer(roomCode);
+    clearNextLevelTimer(roomCode);
   clearPendingStarResolution(roomCode);
   room.status = 'lobby';
   room.game = null;
@@ -1119,6 +1144,7 @@ function resetDevCpuRoomToLobby(room: Room, roomCode: string) {
   if (cpuHost) room.hostId = cpuHost.id;
 }
 
+function registerSocketHandlers() {
 io.on('connection', (socket) => {
   socket.on('room:leave', (ack?: (response: unknown) => void) => {
     const ctx = getSocketContext(socket.id);
@@ -1689,5 +1715,56 @@ io.on('connection', (socket) => {
     markSocketDisconnected(socket.id);
   });
 });
+}
 
-await app.listen({ port: PORT, host: '0.0.0.0' });
+export type ServerStartOptions = {
+  port?: number;
+  host?: string;
+  random?: () => number;
+  timingScale?: number;
+};
+
+export async function startServer(options: ServerStartOptions = {}): Promise<{ url: string; port: number }> {
+  if (listening) {
+    const address = app.server.address();
+    if (address && typeof address !== 'string') return { url: `http://${options.host ?? '127.0.0.1'}:${address.port}`, port: address.port };
+    throw new Error('Server is already starting');
+  }
+
+  if (!app) await createTransport();
+  random = options.random ?? Math.random;
+  timingScale = Number.isFinite(options.timingScale) ? Math.max(0, options.timingScale!) : 1;
+  const host = options.host ?? '0.0.0.0';
+  await app.listen({ port: options.port ?? PORT, host });
+  listening = true;
+  const address = app.server.address();
+  const port = address && typeof address !== 'string' ? address.port : options.port ?? PORT;
+  return { url: `http://${host === '0.0.0.0' ? '127.0.0.1' : host}:${port}`, port };
+}
+
+export function resetServerForTests(): void {
+  for (const roomCode of new Set([...cpuPlayTimers.keys(), ...levelCompleteTimers.keys(), ...interactionLockTimers.keys(), ...starResolutionTimers.keys(), ...nextLevelTimers.keys()])) {
+    clearCpuTurn(roomCode);
+    clearLevelCompleteTimer(roomCode);
+    clearInteractionLockTimer(roomCode);
+    clearPendingStarResolution(roomCode);
+    clearNextLevelTimer(roomCode);
+  }
+  rooms.clear();
+  playerRoom.clear();
+  socketPlayer.clear();
+  pendingStarResolutions.clear();
+  logSeq = 0;
+}
+
+export async function stopServer(): Promise<void> {
+  resetServerForTests();
+  if (listening) await io.close();
+  listening = false;
+  app = undefined as unknown as ReturnType<typeof Fastify>;
+  random = Math.random;
+  timingScale = 1;
+}
+
+const isDirectEntry = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isDirectEntry) await startServer();

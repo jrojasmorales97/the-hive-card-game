@@ -2,6 +2,7 @@
 description: Regenera el contexto funcional, tecnico y de skills del proyecto.
 mode: subagent
 model: openai/gpt-5.6-luna
+variant: high
 variant: medium
 permission:
   edit:
