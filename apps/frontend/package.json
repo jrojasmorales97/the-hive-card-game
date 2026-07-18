@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "test": "node --import tsx --test src/**/*.test.ts",
-    "test:coverage": "node --import tsx --test --experimental-test-coverage src/**/*.test.ts",
+    "test": "node --import tsx --test src/*.test.ts",
+    "test:coverage": "node --import tsx --test --experimental-test-coverage src/*.test.ts",
     "preview": "vite preview --host 0.0.0.0 --port 4173"
   },
   "dependencies": {

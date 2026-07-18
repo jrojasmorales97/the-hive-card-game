@@ -1,7 +1,0 @@
-[mcp_servers.playwright]
-args = [
-    "@playwright/mcp@latest",
-    "--browser",
-    "chromium",
-]
-command = "npx"

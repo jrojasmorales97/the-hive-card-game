@@ -7,47 +7,57 @@ function actionState(type: string, actions: ReturnType<typeof buildPrivateAction
   return actions.find((action) => action.type === type);
 }
 
-test('buildPrivateActions exposes host start in lobby without showing ready toggles', () => {
-  const actions = buildPrivateActions({
-    roomStatus: 'lobby',
-    phase: null,
-    isHost: true,
+function buildContext(overrides: Partial<Parameters<typeof buildPrivateActions>[0]> = {}): Parameters<typeof buildPrivateActions>[0] {
+  return {
+    roomStatus: 'in-game',
+    phase: 'playing',
+    isHost: false,
     ready: false,
-    handCount: 0,
-    connectedPlayerCount: 2,
-    canStartGame: true,
-    interactionLocked: false,
-    interactionLockReason: null,
-    stars: 1,
-    hasStarProposal: false,
-    alreadyAcceptedStar: false,
-    isActiveRoundParticipant: false,
-    inRoundReadyWindow: false,
-    canRetry: false,
-  });
-
-  assert.deepEqual(actionState('ready', actions), { type: 'ready', visible: false, enabled: false });
-  assert.deepEqual(actionState('start', actions), { type: 'start', visible: true, enabled: true });
-});
-
-test('buildPrivateActions disables lobby start until enough players are connected', () => {
-  const actions = buildPrivateActions({
-    roomStatus: 'lobby',
-    phase: null,
-    isHost: true,
-    ready: false,
-    handCount: 0,
-    connectedPlayerCount: 1,
+    handCount: 1,
+    connectedPlayerCount: 3,
     canStartGame: false,
     interactionLocked: false,
     interactionLockReason: null,
     stars: 1,
     hasStarProposal: false,
     alreadyAcceptedStar: false,
-    isActiveRoundParticipant: false,
+    isRoundReadyParticipant: true,
+    isActiveRoundParticipant: true,
+    canParticipateInStarConsensus: true,
     inRoundReadyWindow: false,
     canRetry: false,
-  });
+    ...overrides,
+  };
+}
+
+test('buildPrivateActions exposes host start in lobby without showing ready toggles', () => {
+  const actions = buildPrivateActions(buildContext({
+    roomStatus: 'lobby',
+    phase: null,
+    isHost: true,
+    handCount: 0,
+    canStartGame: true,
+    isRoundReadyParticipant: false,
+    isActiveRoundParticipant: false,
+    canParticipateInStarConsensus: false,
+  }));
+
+  assert.deepEqual(actionState('ready', actions), { type: 'ready', visible: false, enabled: false });
+  assert.deepEqual(actionState('start', actions), { type: 'start', visible: true, enabled: true });
+});
+
+test('buildPrivateActions disables lobby start until enough players are connected', () => {
+  const actions = buildPrivateActions(buildContext({
+    roomStatus: 'lobby',
+    phase: null,
+    isHost: true,
+    handCount: 0,
+    connectedPlayerCount: 1,
+    canStartGame: false,
+    isRoundReadyParticipant: false,
+    isActiveRoundParticipant: false,
+    canParticipateInStarConsensus: false,
+  }));
 
   assert.deepEqual(actionState('start', actions), {
     type: 'start',
@@ -58,23 +68,14 @@ test('buildPrivateActions disables lobby start until enough players are connecte
 });
 
 test('buildPrivateActions blocks ready and unready during authoritative locks', () => {
-  const actions = buildPrivateActions({
-    roomStatus: 'in-game',
+  const actions = buildPrivateActions(buildContext({
     phase: 'focus',
-    isHost: false,
     ready: true,
     handCount: 3,
-    connectedPlayerCount: 3,
-    canStartGame: false,
     interactionLocked: true,
     interactionLockReason: 'dealing',
-    stars: 1,
-    hasStarProposal: false,
-    alreadyAcceptedStar: false,
-    isActiveRoundParticipant: true,
     inRoundReadyWindow: true,
-    canRetry: false,
-  });
+  }));
 
   assert.deepEqual(actionState('unready', actions), {
     type: 'unready',
@@ -84,48 +85,55 @@ test('buildPrivateActions blocks ready and unready during authoritative locks', 
   });
 });
 
-test('buildPrivateActions enables play and pause during active play', () => {
-  const actions = buildPrivateActions({
-    roomStatus: 'in-game',
-    phase: 'playing',
-    isHost: false,
-    ready: false,
-    handCount: 2,
-    connectedPlayerCount: 3,
-    canStartGame: false,
-    interactionLocked: false,
-    interactionLockReason: null,
-    stars: 1,
-    hasStarProposal: false,
-    alreadyAcceptedStar: false,
-    isActiveRoundParticipant: true,
-    inRoundReadyWindow: false,
-    canRetry: false,
+test('buildPrivateActions hides ready toggles and exposes round-out feedback during paused rounds', () => {
+  const actions = buildPrivateActions(buildContext({
+    phase: 'paused',
+    handCount: 0,
+    isRoundReadyParticipant: false,
+    isActiveRoundParticipant: false,
+    inRoundReadyWindow: true,
+  }));
+
+  assert.deepEqual(actionState('ready', actions), { type: 'ready', visible: false, enabled: false });
+  assert.deepEqual(actionState('unready', actions), { type: 'unready', visible: false, enabled: false });
+  assert.deepEqual(actionState('round_out_wait', actions), {
+    type: 'round_out_wait',
+    visible: true,
+    enabled: false,
+    reason: 'The hive is resolving the round without your swarm',
   });
+});
+
+test('buildPrivateActions also exposes round-out feedback in focus after an intra-round pause', () => {
+  const actions = buildPrivateActions(buildContext({
+    phase: 'focus',
+    handCount: 0,
+    isRoundReadyParticipant: false,
+    isActiveRoundParticipant: true,
+    inRoundReadyWindow: true,
+  }));
+
+  assert.equal(actionState('round_out_wait', actions)?.visible, true);
+  assert.equal(actionState('ready', actions)?.visible, false);
+  assert.equal(actionState('unready', actions)?.visible, false);
+});
+
+test('buildPrivateActions enables play and pause during active play', () => {
+  const actions = buildPrivateActions(buildContext({ handCount: 2 }));
 
   assert.equal(actionState('play_card', actions)?.enabled, true);
   assert.equal(actionState('pause', actions)?.enabled, true);
   assert.equal(actionState('propose_star', actions)?.enabled, true);
 });
 
-test('buildPrivateActions keeps star acceptance private to active participant state', () => {
-  const actions = buildPrivateActions({
-    roomStatus: 'in-game',
-    phase: 'playing',
-    isHost: false,
-    ready: false,
-    handCount: 1,
-    connectedPlayerCount: 4,
-    canStartGame: false,
-    interactionLocked: false,
-    interactionLockReason: null,
-    stars: 1,
+test('buildPrivateActions keeps star acceptance visible for connected players even without cards', () => {
+  const actions = buildPrivateActions(buildContext({
+    handCount: 0,
     hasStarProposal: true,
     alreadyAcceptedStar: true,
-    isActiveRoundParticipant: true,
-    inRoundReadyWindow: false,
-    canRetry: false,
-  });
+    isRoundReadyParticipant: false,
+    isActiveRoundParticipant: false,
+  }));
 
   assert.deepEqual(actionState('accept_star', actions), {
     type: 'accept_star',
@@ -136,23 +144,16 @@ test('buildPrivateActions keeps star acceptance private to active participant st
 });
 
 test('buildPrivateActions only exposes retry to the host after the run ends', () => {
-  const actions = buildPrivateActions({
-    roomStatus: 'in-game',
+  const actions = buildPrivateActions(buildContext({
     phase: 'victory',
     isHost: true,
-    ready: false,
     handCount: 0,
-    connectedPlayerCount: 2,
-    canStartGame: false,
-    interactionLocked: false,
-    interactionLockReason: null,
     stars: 0,
-    hasStarProposal: false,
-    alreadyAcceptedStar: false,
+    isRoundReadyParticipant: false,
     isActiveRoundParticipant: false,
-    inRoundReadyWindow: false,
+    canParticipateInStarConsensus: false,
     canRetry: true,
-  });
+  }));
 
   assert.deepEqual(actionState('retry', actions), { type: 'retry', visible: true, enabled: true });
 });

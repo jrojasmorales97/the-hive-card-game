@@ -4,6 +4,16 @@ import { Server } from 'socket.io';
 import { calculateFinalResults, type FinalPlayerResult } from './finalScoring.js';
 import { buildPrivateActions, type PrivateAction } from './privateState.js';
 import {
+  applyRoundReadyRequest,
+  createPauseEventPayload,
+  getActiveRoundParticipants,
+  getConnectedConsensusParticipants,
+  hasAllReadyForRound,
+  isActiveRoundParticipant,
+  isRoundReadyParticipant,
+  pauseRoundForReady as pauseRoundForReadyState,
+} from './roundParticipants.js';
+import {
   acknowledgePendingStarResolution,
   createPendingStarResolution,
   isPendingStarResolutionComplete,
@@ -221,7 +231,9 @@ function buildPrivateState(room: Room, player: Player): { hand: number[]; availa
       stars: room.game?.stars ?? 0,
       hasStarProposal: Boolean(room.game?.starProposal),
       alreadyAcceptedStar: Boolean(room.game?.starProposal?.acceptedBy.has(player.id)),
+      isRoundReadyParticipant: isRoundReadyParticipant(room, player),
       isActiveRoundParticipant: isActiveRoundParticipant(room, player),
+      canParticipateInStarConsensus: player.connected,
       inRoundReadyWindow: Boolean(room.game && (room.game.phase === 'focus' || room.game.phase === 'paused')),
       canRetry: Boolean(room.game && (room.game.phase === 'victory' || room.game.phase === 'game-over') && room.hostId === player.id),
     }),
@@ -451,31 +463,12 @@ function findGlobalLowestCard(room: Room): { player: Player; card: number } | nu
   }, null);
 }
 
-function isRoundParticipationPhase(room: Room): boolean {
-  return room.game?.phase === 'playing' || room.game?.phase === 'paused';
-}
-
-function isActiveRoundParticipant(room: Room, player: Player): boolean {
-  if (!player.connected) return false;
-  if (!isRoundParticipationPhase(room)) return true;
-  return player.hand.length > 0;
-}
-
-function getActiveRoundParticipants(room: Room): Player[] {
-  return Object.values(room.players).filter((player) => isActiveRoundParticipant(room, player));
-}
-
 function countConnectedPlayers(room: Room): number {
   return Object.values(room.players).filter((player) => player.connected).length;
 }
 
 function canStartGame(room: Room): boolean {
   return room.status === 'lobby' && !room.game && countConnectedPlayers(room) >= 2;
-}
-
-function hasAllReadyForRound(room: Room): boolean {
-  const players = getActiveRoundParticipants(room);
-  return players.length > 0 && players.every((player) => player.ready);
 }
 
 function startGameInRoom(room: Room, roomCode: string) {
@@ -525,16 +518,13 @@ function countRemainingCards(room: Room): number {
 }
 
 function pauseRoundForReady(room: Room, roomCode: string) {
-  if (!room.game || room.game.phase !== 'playing') return false;
+  const didPause = pauseRoundForReadyState(room);
+  if (!didPause) return false;
 
-  room.game.phase = 'paused';
-  Object.values(room.players).forEach((player) => {
-    player.ready = false;
-  });
   markCpuPlayersReady(room);
   clearCpuTurn(roomCode);
 
-  return true;
+  return didPause;
 }
 
 function finishGameOver(room: Room, roomCode: string, reason: string) {
@@ -835,7 +825,7 @@ function acceptCpuStarVotes(room: Room, roomCode: string) {
 
   const starProposal = room.game.starProposal;
   Object.values(room.players).forEach((player) => {
-    if (!player.isCpu || !isActiveRoundParticipant(room, player) || starProposal.acceptedBy.has(player.id)) return;
+    if (!player.isCpu || !player.connected || starProposal.acceptedBy.has(player.id)) return;
 
     starProposal.acceptedBy.add(player.id);
     emitGameLog(roomCode, 'game:star-accepted', {
@@ -848,7 +838,7 @@ function acceptCpuStarVotes(room: Room, roomCode: string) {
 function resolveStarIfEveryoneAccepted(room: Room, roomCode: string): boolean {
   if (!room.game?.starProposal) return false;
 
-  const connectedPlayers = getActiveRoundParticipants(room).map((player) => player.id);
+  const connectedPlayers = getConnectedConsensusParticipants(room).map((player) => player.id);
 
   const everyoneAccepted = connectedPlayers.every((id) => room.game?.starProposal?.acceptedBy.has(id));
   if (!everyoneAccepted) return false;
@@ -1352,14 +1342,18 @@ io.on('connection', (socket) => {
       return;
     }
 
-    ctx.player.ready = Boolean(payload?.ready);
-    markCpuPlayersReady(ctx.room);
+    const readyDecision = applyRoundReadyRequest(
+      ctx.room,
+      ctx.player,
+      Boolean(payload?.ready),
+      () => markCpuPlayersReady(ctx.room),
+    );
+    if (!readyDecision.ok) {
+      ack?.(readyDecision);
+      return;
+    }
 
-    if (
-      ctx.room.game &&
-      (ctx.room.game.phase === 'focus' || ctx.room.game.phase === 'paused') &&
-      hasAllReadyForRound(ctx.room)
-    ) {
+    if (readyDecision.shouldBeginCountdown) {
       beginRoundCountdown(ctx.room, ctx.roomCode);
     }
 
@@ -1519,11 +1513,7 @@ io.on('connection', (socket) => {
     pauseRoundForReady(ctx.room, ctx.roomCode);
 
     emitRoomUpdate(ctx.roomCode);
-    io.to(ctx.roomCode).emit('game:paused', {
-      version: ctx.room.version,
-      by: ctx.playerId,
-      message: 'Pause requested. Everyone must ready up again to continue.',
-    });
+    io.to(ctx.roomCode).emit('game:paused', createPauseEventPayload(ctx.room.version, ctx.playerId));
     emitGameLog(ctx.roomCode, 'game:paused', { byPlayerId: ctx.playerId, byPlayerName: ctx.player.name });
     ack?.({ ok: true });
   });
@@ -1586,11 +1576,6 @@ io.on('connection', (socket) => {
 
     if (hasActiveInteractionLock(ctx.room)) {
       ack?.({ ok: false, error: 'Wait until the current transition finishes' });
-      return;
-    }
-
-    if (!isActiveRoundParticipant(ctx.room, ctx.player)) {
-      ack?.({ ok: true });
       return;
     }
 
@@ -1663,11 +1648,6 @@ io.on('connection', (socket) => {
 
     if (hasActiveInteractionLock(ctx.room)) {
       ack?.({ ok: false, error: 'Wait until the current transition finishes' });
-      return;
-    }
-
-    if (!isActiveRoundParticipant(ctx.room, ctx.player)) {
-      ack?.({ ok: false, error: 'You already finished your cards this round' });
       return;
     }
 

@@ -30,6 +30,7 @@ import { buildHandLayout, buildHandSlotPath, type HandSlotId } from './handLayou
 import { podiumToneForRank, shouldUseTwoColumnFinalScoreLayout, timingFeedbackForBand } from './finalScoreUi.js';
 import { levelCompleteOverlayDelayMs } from './levelFlow.js';
 import { buildLobbySeats, shouldShowTopbarRoomCode, waitingRoomMessage } from './lobbyUi.js';
+import { buildCommandActions, type ActionType, type AvailableAction } from './commandActions.js';
 import logoUrl from '../the-hive-logo.png';
 import {
   DEFEAT_SUBTITLE,
@@ -77,15 +78,6 @@ type RoomState = {
     finalResults: FinalPlayerResult[] | null;
     starProposal: { initiatorId: string; acceptedBy: string[] } | null;
   } | null;
-};
-
-type ActionType = 'ready' | 'unready' | 'start' | 'play_card' | 'pause' | 'propose_star' | 'accept_star' | 'retry';
-
-type AvailableAction = {
-  type: ActionType;
-  visible: boolean;
-  enabled: boolean;
-  reason?: string;
 };
 
 type PrivatePlayerState = {
@@ -491,7 +483,7 @@ const RULES = [
   {
     icon: 'task_alt',
     title: 'Ready & Pause',
-    body: 'Before each round starts, every player must press Ready. Any player can call a Pause mid-game - the round resumes only when everyone marks Ready again.',
+      body: 'Before each round starts, every player with cards must press Ready. Any player can call a Pause mid-game - the round resumes only when the players who still hold cards mark Ready again.',
   },
   {
     icon: 'auto_awesome',
@@ -1558,6 +1550,7 @@ export function App() {
   const pauseAction = actionFor('pause');
   const proposeStarAction = actionFor('propose_star');
   const acceptStarAction = actionFor('accept_star');
+  const roundOutWaitAction = actionFor('round_out_wait');
   const readyOverlayBlocked = eventOverlay?.kind === 'level-complete';
   const prepLabel =
     activeInteractionLock?.reason === 'dealing'
@@ -1592,16 +1585,6 @@ export function App() {
     game && (game.phase === 'focus' || activeInteractionLock?.reason === 'dealing' || isCountdownLockActive(activeInteractionLock)),
   );
   const placeholderLabel = showRoundClearingPlaceholder ? 'The hive is still clearing' : prepLabel;
-  const showHivePlaceholderAction =
-    (showHivePlaceholder || showRoundClearingPlaceholder) &&
-    !showReady &&
-    !showNotReady &&
-    !showStart &&
-    !showPause &&
-    !showProposeStar &&
-    !showCancelStar &&
-    !showAcceptStar &&
-    !showRejectStar;
   const currentReward = game ? rewardLabel(game.currentLevel) : 'No reward';
   const currentRewardType = game ? REWARDS[game.currentLevel] ?? null : null;
   const dealtCards = useMemo(() => hand.slice(0, dealtHandCount), [hand, dealtHandCount]);
@@ -1674,130 +1657,46 @@ export function App() {
 
     return () => window.cancelAnimationFrame(frame);
   }, [handLayout.cardSlotMap, handLayout.slotOrder, room?.game?.phase]);
-  const baseCommandActions = [
-    showCancelStar
-      ? {
-          key: 'cancel-star',
-          label: 'Retirar propuesta',
-          icon: 'star',
-          className: 'command-button star full-span',
-          onClick: cancelStarProposal,
-          disabled: !isPlaying || interactionBlocked,
-        }
-      : null,
-    showAcceptStar
-      ? {
-          key: 'accept-star',
-          label: 'Accept star',
-          icon: 'handshake',
-          className: 'command-button pulse',
-          onClick: acceptStar,
-          disabled: !acceptStarAction?.enabled,
-        }
-      : null,
-    showRejectStar
-      ? {
-          key: 'reject-star',
-          label: 'Reject star',
-          icon: 'close',
-          className: 'command-button secondary',
-          onClick: rejectStar,
-          disabled: !isPlaying || interactionBlocked,
-        }
-      : null,
-    showProposeStar
-      ? {
-          key: 'star',
-          label: 'Propose star',
-          icon: 'star',
-          className: 'command-button star',
-          onClick: proposeStar,
-          disabled: !proposeStarAction?.enabled,
-        }
-      : null,
-    showPause && !showCancelStar && !showAcceptStar && !showRejectStar
-      ? {
-          key: 'pause',
-          label: 'Pause',
-          icon: 'pause',
-          className: `command-button secondary${showProposeStar ? '' : ' full-span'}`,
-          onClick: requestPause,
-          disabled: !pauseAction?.enabled,
-        }
-      : null,
-    showStart
-      ? {
-          key: 'start',
-          label: 'Start',
-          icon: 'play_arrow',
-          className: 'command-button',
-          onClick: startGame,
-          disabled: !startAction?.enabled,
-        }
-      : null,
-    showReady
-      ? {
-          key: 'ready',
-          label: 'Ready',
-          icon: 'task_alt',
-          className: 'command-button pulse',
-          onClick: () => setReady(true),
-          disabled: !readyAction?.enabled || readyOverlayBlocked,
-        }
-      : null,
-    showNotReady
-      ? showHivePlaceholder
-        ? {
-            key: 'hive-sync',
-            label: placeholderLabel,
-            icon: 'hive',
-            className: 'command-button secondary prep-placeholder',
-            onClick: () => {},
-            disabled: true,
-          }
-        : {
-            key: 'waiting',
-            label: 'Waiting',
-            icon: 'hourglass_top',
-            className: 'command-button secondary',
-            onClick: () => setReady(false),
-            disabled: !unreadyAction?.enabled || readyOverlayBlocked,
-          }
-      : null,
-    showHivePlaceholderAction
-      ? {
-          key: 'hive-sync',
-          label: placeholderLabel,
-          icon: 'hive',
-          className: 'command-button secondary prep-placeholder',
-          onClick: () => {},
-          disabled: true,
-        }
-      : null,
-  ].filter(Boolean) as Array<{
-    key: string;
-    label: string;
-    icon: string;
-    className: string;
-    onClick: () => void;
-    disabled: boolean;
-  }>;
-
-  const commandActions =
-    baseCommandActions.length > 0
-      ? baseCommandActions
-      : room?.status === 'in-game' && game && game.phase !== 'victory' && game.phase !== 'game-over'
-        ? [
-            {
-              key: 'hive-sync',
-              label: placeholderLabel,
-              icon: 'hive',
-              className: 'command-button secondary prep-placeholder layout-placeholder',
-              onClick: () => {},
-              disabled: true,
-            },
-          ]
-        : [];
+  const commandActions = buildCommandActions({
+    readyAction,
+    unreadyAction,
+    roundOutWaitAction,
+    startAction,
+    pauseAction,
+    proposeStarAction,
+    acceptStarAction,
+    showCancelStar,
+    showAcceptStar,
+    showRejectStar,
+    showProposeStar,
+    showHivePlaceholder: showHivePlaceholder || showRoundClearingPlaceholder,
+    placeholderLabel,
+    readyOverlayBlocked,
+    isPlaying,
+    interactionBlocked,
+    isInGame: room?.status === 'in-game',
+    phase: game?.phase ?? null,
+  }).map((action) => ({
+    ...action,
+    onClick:
+      action.key === 'cancel-star'
+        ? cancelStarProposal
+        : action.key === 'accept-star'
+          ? acceptStar
+          : action.key === 'reject-star'
+            ? rejectStar
+            : action.key === 'star'
+              ? proposeStar
+              : action.key === 'pause'
+                ? requestPause
+                : action.key === 'start'
+                  ? startGame
+                  : action.key === 'ready'
+                    ? () => setReady(true)
+                    : action.key === 'waiting'
+                      ? () => setReady(false)
+                      : () => {},
+  }));
   function saveRoomCode(roomCode: string, inputCode = roomCode) {
     localStorage.setItem(STORAGE_KEYS.lastRoomCode, roomCode);
     setRoomCodeInput(inputCode);

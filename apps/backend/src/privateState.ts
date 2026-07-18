@@ -3,6 +3,7 @@ export type InteractionLockReason = 'dealing' | 'countdown' | 'error' | 'star' |
 export type PrivateActionType =
   | 'ready'
   | 'unready'
+  | 'round_out_wait'
   | 'start'
   | 'play_card'
   | 'pause'
@@ -30,7 +31,9 @@ export type PrivateActionContext = {
   stars: number;
   hasStarProposal: boolean;
   alreadyAcceptedStar: boolean;
+  isRoundReadyParticipant: boolean;
   isActiveRoundParticipant: boolean;
+  canParticipateInStarConsensus: boolean;
   inRoundReadyWindow: boolean;
   canRetry: boolean;
 };
@@ -49,13 +52,14 @@ function action(type: PrivateActionType, visible: boolean, enabled: boolean, rea
 }
 
 export function buildPrivateActions(ctx: PrivateActionContext): PrivateAction[] {
-  const readyVisible = !ctx.ready && ctx.inRoundReadyWindow;
-  const unreadyVisible = ctx.ready && ctx.inRoundReadyWindow;
+  const readyVisible = ctx.isRoundReadyParticipant && !ctx.ready && ctx.inRoundReadyWindow;
+  const unreadyVisible = ctx.isRoundReadyParticipant && ctx.ready && ctx.inRoundReadyWindow;
+  const roundOutWaitVisible = !ctx.isRoundReadyParticipant && ctx.inRoundReadyWindow;
   const startVisible = ctx.roomStatus === 'lobby' && ctx.isHost;
   const playVisible = ctx.handCount > 0;
   const pauseVisible = ctx.phase === 'playing' && ctx.isActiveRoundParticipant;
   const proposeStarVisible = ctx.phase === 'playing' && ctx.isActiveRoundParticipant;
-  const acceptStarVisible = ctx.phase === 'playing' && ctx.isActiveRoundParticipant && ctx.hasStarProposal;
+  const acceptStarVisible = ctx.phase === 'playing' && ctx.canParticipateInStarConsensus && ctx.hasStarProposal;
   const retryVisible = ctx.isHost && ctx.canRetry;
   const lockReason = ctx.interactionLocked ? blockedReason(ctx.interactionLockReason) : undefined;
 
@@ -65,7 +69,13 @@ export function buildPrivateActions(ctx: PrivateActionContext): PrivateAction[] 
       'unready',
       unreadyVisible,
       unreadyVisible && !ctx.interactionLocked,
-      unreadyVisible && ctx.interactionLocked ? lockReason : undefined,
+        unreadyVisible && ctx.interactionLocked ? lockReason : undefined,
+      ),
+    action(
+      'round_out_wait',
+      roundOutWaitVisible,
+      false,
+      roundOutWaitVisible ? 'The hive is resolving the round without your swarm' : undefined,
     ),
     action(
       'start',

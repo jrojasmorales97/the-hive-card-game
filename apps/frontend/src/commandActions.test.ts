@@ -1,0 +1,204 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+
+import { buildCommandActions } from './commandActions.js';
+
+test('buildCommandActions maps round-out private actions to a disabled hive placeholder', () => {
+  const actions = buildCommandActions({
+    roundOutWaitAction: {
+      type: 'round_out_wait',
+      visible: true,
+      enabled: false,
+      reason: 'The hive is resolving the round without your swarm',
+    },
+    showCancelStar: false,
+    showAcceptStar: false,
+    showRejectStar: false,
+    showProposeStar: false,
+    showHivePlaceholder: false,
+    placeholderLabel: 'The hive is tuning the next pulse',
+    readyOverlayBlocked: false,
+    isPlaying: false,
+    interactionBlocked: false,
+    isInGame: true,
+    phase: 'paused',
+  });
+
+  assert.deepEqual(actions, [
+    {
+      key: 'hive-sync',
+      label: 'The hive is resolving the round without your swarm',
+      icon: 'hive',
+      className: 'command-button secondary prep-placeholder',
+      disabled: true,
+    },
+  ]);
+});
+
+test('buildCommandActions keeps waiting CTA for active players that already readied', () => {
+  const actions = buildCommandActions({
+    unreadyAction: {
+      type: 'unready',
+      visible: true,
+      enabled: true,
+    },
+    showCancelStar: false,
+    showAcceptStar: false,
+    showRejectStar: false,
+    showProposeStar: false,
+    showHivePlaceholder: false,
+    placeholderLabel: 'The hive is tuning the next pulse',
+    readyOverlayBlocked: false,
+    isPlaying: false,
+    interactionBlocked: false,
+    isInGame: true,
+    phase: 'paused',
+  });
+
+  assert.equal(actions[0]?.key, 'waiting');
+  assert.equal(actions[0]?.disabled, false);
+});
+
+test('buildCommandActions keeps ready visible for active players and respects overlay locks', () => {
+  const actions = buildCommandActions({
+    readyAction: {
+      type: 'ready',
+      visible: true,
+      enabled: true,
+    },
+    showCancelStar: false,
+    showAcceptStar: false,
+    showRejectStar: false,
+    showProposeStar: false,
+    showHivePlaceholder: false,
+    placeholderLabel: 'The hive is tuning the next pulse',
+    readyOverlayBlocked: true,
+    isPlaying: false,
+    interactionBlocked: false,
+    isInGame: true,
+    phase: 'focus',
+  });
+
+  assert.deepEqual(actions, [
+    {
+      key: 'ready',
+      label: 'Ready',
+      icon: 'task_alt',
+      className: 'command-button pulse',
+      disabled: true,
+    },
+  ]);
+});
+
+test('buildCommandActions keeps star consensus CTAs ahead of the round-out placeholder', () => {
+  const actions = buildCommandActions({
+    roundOutWaitAction: {
+      type: 'round_out_wait',
+      visible: true,
+      enabled: false,
+      reason: 'The hive is resolving the round without your swarm',
+    },
+    acceptStarAction: {
+      type: 'accept_star',
+      visible: true,
+      enabled: true,
+    },
+    showCancelStar: false,
+    showAcceptStar: true,
+    showRejectStar: true,
+    showProposeStar: false,
+    showHivePlaceholder: false,
+    placeholderLabel: 'The hive is tuning the next pulse',
+    readyOverlayBlocked: false,
+    isPlaying: true,
+    interactionBlocked: false,
+    isInGame: true,
+    phase: 'playing',
+  });
+
+  assert.deepEqual(actions, [
+    {
+      key: 'accept-star',
+      label: 'Accept star',
+      icon: 'handshake',
+      className: 'command-button pulse',
+      disabled: false,
+    },
+    {
+      key: 'reject-star',
+      label: 'Reject star',
+      icon: 'close',
+      className: 'command-button secondary',
+      disabled: false,
+    },
+  ]);
+});
+
+test('buildCommandActions preserves gameplay CTAs before fallback placeholders', () => {
+  const actions = buildCommandActions({
+    pauseAction: {
+      type: 'pause',
+      visible: true,
+      enabled: true,
+    },
+    proposeStarAction: {
+      type: 'propose_star',
+      visible: true,
+      enabled: true,
+    },
+    showCancelStar: false,
+    showAcceptStar: false,
+    showRejectStar: false,
+    showProposeStar: true,
+    showHivePlaceholder: false,
+    placeholderLabel: 'The hive is tuning the next pulse',
+    readyOverlayBlocked: false,
+    isPlaying: true,
+    interactionBlocked: false,
+    isInGame: true,
+    phase: 'playing',
+  });
+
+  assert.deepEqual(actions, [
+    {
+      key: 'star',
+      label: 'Propose star',
+      icon: 'star',
+      className: 'command-button star',
+      disabled: false,
+    },
+    {
+      key: 'pause',
+      label: 'Pause',
+      icon: 'pause',
+      className: 'command-button secondary',
+      disabled: false,
+    },
+  ]);
+});
+
+test('buildCommandActions falls back to layout placeholder during in-game idle states', () => {
+  const actions = buildCommandActions({
+    showCancelStar: false,
+    showAcceptStar: false,
+    showRejectStar: false,
+    showProposeStar: false,
+    showHivePlaceholder: false,
+    placeholderLabel: 'The hive is tuning the next pulse',
+    readyOverlayBlocked: false,
+    isPlaying: false,
+    interactionBlocked: false,
+    isInGame: true,
+    phase: 'focus',
+  });
+
+  assert.deepEqual(actions, [
+    {
+      key: 'hive-sync',
+      label: 'The hive is tuning the next pulse',
+      icon: 'hive',
+      className: 'command-button secondary prep-placeholder layout-placeholder',
+      disabled: true,
+    },
+  ]);
+});
