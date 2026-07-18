@@ -1,22 +1,5 @@
-export type InteractionLockReason = 'dealing' | 'countdown' | 'error' | 'star' | 'level-complete';
-
-export type PrivateActionType =
-  | 'ready'
-  | 'unready'
-  | 'round_out_wait'
-  | 'start'
-  | 'play_card'
-  | 'pause'
-  | 'propose_star'
-  | 'accept_star'
-  | 'retry';
-
-export type PrivateAction = {
-  type: PrivateActionType;
-  visible: boolean;
-  enabled: boolean;
-  reason?: string;
-};
+import type { InteractionLockReason, PrivateAction, PrivateActionType } from '@the-hive/contracts';
+export type { InteractionLockReason, PrivateAction, PrivateActionType } from '@the-hive/contracts';
 
 export type PrivateActionContext = {
   roomStatus: 'lobby' | 'in-game';

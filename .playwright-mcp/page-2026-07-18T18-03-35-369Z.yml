@@ -1,0 +1,89 @@
+- main [ref=e3]:
+  - generic [ref=e128]:
+    - button "Private CPU room CPUON2" [disabled] [ref=e130]:
+      - generic [ref=e131]: CPUON2
+      - generic [ref=e132]: lock
+    - generic [ref=e133]:
+      - button "Log" [ref=e134] [cursor=pointer]:
+        - generic [ref=e135]: notes
+        - text: Log
+      - button "Leave room" [ref=e136] [cursor=pointer]:
+        - generic [ref=e137]: logout
+        - text: Exit
+  - generic [ref=e138]:
+    - generic [ref=e139]:
+      - generic [ref=e140]:
+        - article [ref=e141]:
+          - generic [ref=e142]:
+            - generic "Playing" [ref=e220]: style
+            - generic "CPU player" [ref=e144]: CPU
+            - strong [ref=e145]: CPU 1
+            - generic [ref=e146]: x1
+          - generic [ref=e147]:
+            - generic [ref=e148]: DONE
+            - strong [ref=e149]: CPU 1
+        - article [ref=e150]:
+          - generic [ref=e151]:
+            - generic "Playing" [ref=e221]: style
+            - generic "CPU player" [ref=e153]: CPU
+            - strong [ref=e154]: CPU 2
+            - generic [ref=e155]: x1
+          - generic [ref=e156]:
+            - generic [ref=e157]: DONE
+            - strong [ref=e158]: CPU 2
+        - article "You finished this round" [ref=e227]:
+          - generic [ref=e160]:
+            - generic "Playing" [ref=e222]: style
+            - generic "Host" [ref=e162]: crown
+            - strong [ref=e163]: Playwright
+            - generic [ref=e164]: x0
+          - generic [ref=e165]:
+            - generic [ref=e166]: DONE
+            - strong [ref=e167]: Playwright
+        - button "Center pile. Open game log" [ref=e168] [cursor=pointer]:
+          - article [ref=e228]:
+            - generic [ref=e229]: "5"
+            - generic [ref=e230]: "5"
+            - generic [ref=e231]: "5"
+      - generic [ref=e170]:
+        - generic [ref=e171]:
+          - generic "Player resources" [ref=e173]:
+            - generic [ref=e174]:
+              - strong [ref=e175]:
+                - generic [ref=e176]: favorite
+                - text: Lives
+              - text: "3"
+            - generic [ref=e177]:
+              - strong [ref=e178]:
+                - generic [ref=e179]: star
+                - text: Stars
+              - text: "1"
+            - generic [ref=e180]:
+              - strong [ref=e181]:
+                - generic [ref=e182]: floor
+                - text: Level
+              - text: 1/10
+          - button "The hive is still clearing" [disabled] [ref=e232]:
+            - generic [ref=e233]: hive
+            - text: The hive is still clearing
+        - generic [ref=e187]:
+          - generic "Upcoming cards" [ref=e188]
+          - generic [ref=e210]: No card
+    - complementary "Game log":
+      - generic:
+        - strong: Game log
+        - button "Close game log":
+          - generic: close
+      - generic:
+        - article:
+          - generic: style
+          - paragraph: Playwright played 5
+        - article:
+          - generic: play_arrow
+          - paragraph: Game started
+        - article:
+          - generic: person_add
+          - paragraph: Playwright joined the room
+        - article:
+          - generic: crown
+          - paragraph: Playwright is now host

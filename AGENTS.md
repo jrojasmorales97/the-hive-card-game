@@ -9,6 +9,7 @@
 
 - Documento: `.harness/context/architecture.md`
 - Leer cuando: vayas a cambiar stack, comandos, estructura de carpetas, contratos Socket.IO, patrones backend/frontend, dependencias o workflow de despliegue observados en `docker-compose.yml`, `render.yaml`, `apps/backend/` y `apps/frontend/`.
+- Contratos Socket.IO: `packages/contracts/`; consultar antes de modificar payloads, snapshots, acks o eventos realtime.
 
 ## Artefactos SDD
 

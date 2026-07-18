@@ -1,0 +1,68 @@
+- main [ref=e3]:
+  - generic [ref=e50]:
+    - generic [ref=e53]:
+      - generic [ref=e54]:
+        - button "Leave room" [ref=e55] [cursor=pointer]:
+          - generic [ref=e56]: logout
+          - text: Exit
+        - button "CPUON2" [disabled] [ref=e57]:
+          - generic [ref=e59]: lock
+      - generic [ref=e60]:
+        - paragraph [ref=e61]: Room lobby
+        - paragraph [ref=e62]: Share the code and start when ready.
+      - generic "Players in room" [ref=e63]:
+        - article [ref=e64]:
+          - generic [ref=e65]:
+            - generic [ref=e66]: person
+            - generic [ref=e67]:
+              - strong [ref=e68]: CPU 1
+              - generic [ref=e69]: CPU
+        - article [ref=e71]:
+          - generic [ref=e72]:
+            - generic [ref=e73]: person
+            - generic [ref=e74]:
+              - strong [ref=e75]: CPU 2
+              - generic [ref=e76]: CPU
+        - article [ref=e78]:
+          - generic [ref=e79]:
+            - generic [ref=e80]: person
+            - strong [ref=e82]: Playwright
+        - article [ref=e83]:
+          - generic [ref=e84]: add
+        - article [ref=e86]:
+          - generic [ref=e87]: add
+        - article [ref=e89]:
+          - generic [ref=e90]: add
+        - article [ref=e92]:
+          - generic [ref=e93]: add
+        - article [ref=e95]:
+          - generic [ref=e96]: add
+      - button "Start" [ref=e99] [cursor=pointer]
+    - generic [ref=e100]:
+      - heading "How to play" [level=2] [ref=e101]
+      - region "How to play" [ref=e102]:
+        - generic [ref=e103]:
+          - generic [ref=e104]:
+            - generic [ref=e105]: hub
+            - heading "The Goal" [level=3] [ref=e106]
+          - paragraph [ref=e107]: Play all 100 cards in ascending order as a team - in complete silence. No talking, no signals, no gestures. Only shared instinct.
+        - generic [ref=e108]:
+          - generic [ref=e109]:
+            - generic [ref=e110]: style
+            - heading "Play Your Lowest" [level=3] [ref=e111]
+          - paragraph [ref=e112]: Each round you hold cards. When the timing feels right, play your lowest. If someone plays out of order, the team loses a life and all lower cards are discarded automatically.
+        - generic [ref=e113]:
+          - generic [ref=e114]:
+            - generic [ref=e115]: task_alt
+            - heading "Ready & Pause" [level=3] [ref=e116]
+          - paragraph [ref=e117]: Before each round starts, every player with cards must press Ready. Any player can call a Pause mid-game - the round resumes only when the players who still hold cards mark Ready again.
+        - generic [ref=e118]:
+          - generic [ref=e119]:
+            - generic [ref=e120]: auto_awesome
+            - heading "Lives, Stars & Rewards" [level=3] [ref=e121]
+          - paragraph [ref=e122]: Stars let the whole team discard their lowest card simultaneously. Clearing certain levels earns extra lives or stars as a reward.
+      - generic [ref=e123]:
+        - button [ref=e124] [cursor=pointer]
+        - button [ref=e125] [cursor=pointer]
+        - button [ref=e126] [cursor=pointer]
+        - button [ref=e127] [cursor=pointer]

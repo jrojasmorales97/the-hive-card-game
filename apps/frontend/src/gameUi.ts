@@ -1,12 +1,5 @@
-export type InteractionLockReason = 'dealing' | 'countdown' | 'error' | 'star' | 'level-complete';
-
-export type InteractionLock = {
-  reason: InteractionLockReason;
-  until: number;
-};
-
-type RoomStatus = 'lobby' | 'in-game';
-type GamePhase = 'focus' | 'playing' | 'paused' | 'round-complete' | 'level-complete' | 'game-over' | 'victory';
+import type { GamePhase, InteractionLock, RoomStatus } from '@the-hive/contracts';
+export type { InteractionLock } from '@the-hive/contracts';
 
 export function isInteractionLockActive(lock: InteractionLock | null | undefined, now = Date.now()): boolean {
   return Boolean(lock && lock.until > now);

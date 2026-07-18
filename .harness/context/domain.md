@@ -27,7 +27,9 @@ The Hive es una implementacion web de un juego cooperativo de cartas en tiempo r
 | 2026-07-18 | Desconectados conservan cartas sin TTL; identidad por `playerId` y host migran. | Por confirmar | `markSocketDisconnected`, `room:join`, `pickNextHost` |
 | 2026-07-18 | Balance, ready y consenso usan criterios distintos de registro/conexión/cartas. | Por confirmar | `startGameInRoom`, `roundParticipants.ts`, estrella |
 | 2026-07-18 | Leave en partida, scoring, versiones, estrella tras disconnect y terminales son ambiguos. | Por confirmar | `index.ts` |
-| 2026-07-18 | `room:kick` solo está implementado en backend. | Por confirmar | `index.ts` |
+ | 2026-07-18 | `room:kick` solo está implementado en backend. | Por confirmar | `index.ts` |
+| 2026-07-18 | El tráfico que cumple el contrato Socket.IO conserva eventos, campos legacy, versiones y acks; input malformado se rechaza sin mutar la partida ni cerrar la conexión. | Implementado | `packages/contracts`, handlers Socket.IO |
+| 2026-07-18 | El estado público no puede incluir mano ni `socketId`; la mano y acciones pertenecen exclusivamente al envelope privado del propietario. | Implementado | `packages/contracts/src/state.ts`, serializers |
 
 # Funcionalidades
 

@@ -1,8 +1,8 @@
 services:
   backend:
     build:
-      context: ./apps/backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: apps/backend/Dockerfile
     container_name: thehive-backend
     ports:
       - "3001:3001"
@@ -11,13 +11,14 @@ services:
       - CLIENT_ORIGIN=*
       - DEV_CPU_PLAY_DELAY_MS=${DEV_CPU_PLAY_DELAY_MS:-900}
     volumes:
-      - ./apps/backend:/app
-      - /app/node_modules
+      - ./apps/backend:/workspace/apps/backend
+      - ./packages/contracts:/workspace/packages/contracts
+      - /workspace/apps/backend/node_modules
 
   frontend:
     build:
-      context: ./apps/frontend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: apps/frontend/Dockerfile
     container_name: thehive-frontend
     ports:
       - "5173:5173"
@@ -26,8 +27,9 @@ services:
     depends_on:
       - backend
     volumes:
-      - ./apps/frontend:/app
-      - /app/node_modules
+      - ./apps/frontend:/workspace/apps/frontend
+      - ./packages/contracts:/workspace/packages/contracts
+      - /workspace/apps/frontend/node_modules
 
   tunnel:
     image: cloudflare/cloudflared:latest

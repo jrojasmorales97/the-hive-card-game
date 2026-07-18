@@ -1,15 +1,5 @@
-export type InteractionLockReason = 'dealing' | 'countdown' | 'error' | 'star' | 'level-complete';
-
-export type InteractionLock = {
-  reason: InteractionLockReason;
-  until: number;
-};
-
-export type StarDiscardPreview = {
-  card: number;
-  playerId: string;
-  playerName: string;
-};
+import type { InteractionLock, InteractionLockReason, StarDiscardPreview } from '@the-hive/contracts';
+export type { InteractionLock, InteractionLockReason, StarDiscardPreview } from '@the-hive/contracts';
 
 export const DEAL_CARD_INTERVAL_MS = 460;
 export const DEAL_SETTLE_MS = 80;

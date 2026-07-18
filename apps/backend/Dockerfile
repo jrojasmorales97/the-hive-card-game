@@ -1,11 +1,17 @@
 FROM node:20-alpine
 
-WORKDIR /app
+WORKDIR /workspace
 
-COPY package*.json ./
-RUN npm install
+COPY packages/contracts/package*.json packages/contracts/
+RUN npm --prefix packages/contracts install
+COPY packages/contracts packages/contracts
+RUN npm --prefix packages/contracts run build
 
-COPY . .
+COPY apps/backend/package*.json apps/backend/
+RUN npm --prefix apps/backend install
+COPY apps/backend apps/backend
+
+WORKDIR /workspace/apps/backend
 
 EXPOSE 3001
 

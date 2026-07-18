@@ -179,6 +179,25 @@ test('current baseline: transport rejects unbound clients and host kick remains 
   assert.equal((await kicked).message, 'The host removed you from the room.');
 });
 
+test('invalid wire payloads are rejected without mutating state or disconnecting clients', async (t) => {
+  const { url } = await startIntegrationServer();
+  const clients: TestClient[] = [];
+  t.after(async () => closeIntegration(clients));
+  const host = await createClient(url);
+  clients.push(host);
+
+  assert.deepEqual(await emitWithAck<Ack>(host, 'room:create', null), { ok: false, error: 'Invalid player name or identifier' });
+  const created = await emitWithAck<CreateAck>(host, 'room:create', { playerName: 'Host', playerId: 'host-0001' });
+  assert.equal(created.ok, true);
+  const before = await resync(host);
+
+  assert.deepEqual(await emitWithAck<Ack>(host, 'player:ready', { ready: 'yes' }), { ok: false, error: 'Invalid ready state' });
+  assert.deepEqual(await emitWithAck<Ack>(host, 'game:play-card', { card: '1' }), { ok: false, error: 'Invalid card' });
+  const after = await resync(host);
+  assert.equal(after.version, before.version);
+  assert.equal(host.connected, true);
+});
+
 test('current baseline: start, ready, correct play, pause, resume, and error penalty use real sockets', async (t) => {
   const { url } = await startIntegrationServer();
   const clients: TestClient[] = [];

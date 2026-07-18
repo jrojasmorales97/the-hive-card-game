@@ -1,6 +1,7 @@
 export type FinalPodiumTone = 'gold' | 'silver' | 'bronze' | 'none';
 export type FinalTimingFeedback = 'ONTIME' | 'SLOW' | 'FAST';
-export type FinalTimingBand = 'sync' | 'slightly-fast' | 'very-fast' | 'slightly-slow' | 'very-slow' | 'unrated';
+import type { FinalPlayerResult } from '@the-hive/contracts';
+export type FinalTimingBand = FinalPlayerResult['timingBand'];
 
 export function shouldUseTwoColumnFinalScoreLayout(playerCount: number): boolean {
   return playerCount > 6;

@@ -1,0 +1,27 @@
+{
+  "name": "@the-hive/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.js",
+    "./state": "./dist/state.js",
+    "./actions": "./dist/actions.js",
+    "./logs": "./dist/logs.js",
+    "./events/lobby": "./dist/events/lobby.js",
+    "./events/round": "./dist/events/round.js",
+    "./events/star": "./dist/events/star.js",
+    "./events/progression": "./dist/events/progression.js",
+    "./events/maps": "./dist/events/maps.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --import tsx --test src/*.test.ts",
+    "test:coverage": "npm run build && node --test --experimental-test-coverage dist/*.test.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}

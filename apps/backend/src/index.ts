@@ -1,9 +1,27 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { Server } from 'socket.io';
+import type {
+  ClientToServerEvents,
+  GameLogEvent,
+  GameLogType,
+  PrivatePlayerEnvelope,
+  PrivatePlayerState,
+  PublicRoomEnvelope,
+  PublicRoomState,
+  RoomSnapshot,
+  ServerToClientEvents,
+} from '@the-hive/contracts';
+import {
+  parseIdentityPayload,
+  parseJoinRoomPayload,
+  parseKickPayload,
+  parsePlayCardPayload,
+  parseReadyPayload,
+} from '@the-hive/contracts';
 import { pathToFileURL } from 'node:url';
 import { calculateFinalResults, type FinalPlayerResult } from './finalScoring.js';
-import { buildPrivateActions, type PrivateAction } from './privateState.js';
+import { buildPrivateActions } from './privateState.js';
 import {
   applyRoundReadyRequest,
   createPauseEventPayload,
@@ -88,13 +106,7 @@ type Room = {
   status: 'lobby' | 'in-game';
   game: GameState | null;
   version: number;
-  logs: Array<{
-    id: string;
-    ts: number;
-    roomCode: string;
-    type: string;
-    payload: Record<string, unknown>;
-  }>;
+  logs: GameLogEvent[];
 };
 
 const rooms = new Map<string, Room>();
@@ -132,7 +144,7 @@ const ROUND_OUT_UNFLIP_MS = 520;
 const RESTART_BANNER_DELAY_MS = 5000;
 
 let app: ReturnType<typeof Fastify>;
-let io: Server;
+let io: Server<ClientToServerEvents, ServerToClientEvents>;
 
 async function createTransport(): Promise<void> {
   app = Fastify({ logger: true });
@@ -141,7 +153,7 @@ async function createTransport(): Promise<void> {
     credentials: !ALLOW_ALL_ORIGINS,
   });
   app.get('/health', async () => ({ ok: true }));
-  io = new Server(app.server, {
+  io = new Server<ClientToServerEvents, ServerToClientEvents>(app.server, {
     cors: {
       origin: ALLOW_ALL_ORIGINS ? true : CLIENT_ORIGIN,
       methods: ['GET', 'POST'],
@@ -171,7 +183,7 @@ function createUniqueRoomCode(): string {
   return code;
 }
 
-function serializeRoom(room: Room) {
+function serializeRoom(room: Room): PublicRoomState {
   if (room.game && !isInteractionLockActive(room.game.interactionLock)) {
     room.game.interactionLock = null;
   }
@@ -219,7 +231,7 @@ function serializeRoom(room: Room) {
   };
 }
 
-function buildPrivateState(room: Room, player: Player): { hand: number[]; availableActions: PrivateAction[] } {
+function buildPrivateState(room: Room, player: Player): PrivatePlayerState {
   const lockReason = room.game?.interactionLock?.reason ?? null;
   const interactionLocked = hasActiveInteractionLock(room);
 
@@ -247,7 +259,7 @@ function buildPrivateState(room: Room, player: Player): { hand: number[]; availa
   };
 }
 
-function createPublicRoomEnvelope(room: Room, serverTime = Date.now()) {
+function createPublicRoomEnvelope(room: Room, serverTime = Date.now()): PublicRoomEnvelope {
   return {
     version: room.version,
     serverTime,
@@ -255,7 +267,7 @@ function createPublicRoomEnvelope(room: Room, serverTime = Date.now()) {
   };
 }
 
-function createPrivateStateEnvelope(room: Room, player: Player, serverTime = Date.now()) {
+function createPrivateStateEnvelope(room: Room, player: Player, serverTime = Date.now()): PrivatePlayerEnvelope {
   return {
     version: room.version,
     serverTime,
@@ -263,7 +275,7 @@ function createPrivateStateEnvelope(room: Room, player: Player, serverTime = Dat
   };
 }
 
-function createRoomSnapshot(room: Room, player: Player, serverTime = Date.now()) {
+function createRoomSnapshot(room: Room, player: Player, serverTime = Date.now()): RoomSnapshot {
   return {
     version: room.version,
     serverTime,
@@ -292,9 +304,9 @@ function emitRoomUpdate(code: string) {
   });
 }
 
-function emitGameLog(roomCode: string, type: string, payload: Record<string, unknown> = {}) {
+function emitGameLog(roomCode: string, type: GameLogType, payload: Record<string, unknown> = {}) {
   const room = rooms.get(roomCode);
-  const entry = {
+  const entry: GameLogEvent = {
     id: `${Date.now()}-${++logSeq}`,
     ts: Date.now(),
     roomCode,
@@ -698,7 +710,7 @@ function resolveErrorAndDiscard(room: Room, playedCard: number) {
   discardLowerCards(room.players, playedCard);
 }
 
-function playCardInRoom(room: Room, roomCode: string, player: Player, card: number): { ok: boolean; error?: string } {
+function playCardInRoom(room: Room, roomCode: string, player: Player, card: number): { ok: true } | { ok: false; error: string } {
   if (!room.game) {
     return { ok: false, error: 'Invalid game state' };
   }
@@ -1146,7 +1158,7 @@ function resetDevCpuRoomToLobby(room: Room, roomCode: string) {
 
 function registerSocketHandlers() {
 io.on('connection', (socket) => {
-  socket.on('room:leave', (ack?: (response: unknown) => void) => {
+  socket.on('room:leave', (ack) => {
     const ctx = getSocketContext(socket.id);
     if (!ctx) {
       ack?.({ ok: false, error: 'You are not in a room' });
@@ -1161,7 +1173,7 @@ io.on('connection', (socket) => {
     ack?.({ ok: true });
   });
 
-  socket.on('room:resync', (ack?: (response: unknown) => void) => {
+  socket.on('room:resync', (ack) => {
     const ctx = getSocketContext(socket.id);
     if (!ctx) {
       ack?.({ ok: false, error: 'You are not in a room' });
@@ -1177,9 +1189,14 @@ io.on('connection', (socket) => {
     });
   });
 
-  socket.on('room:create', (payload: { playerName: string; playerId: string }, ack?: (response: unknown) => void) => {
-    const playerName = payload?.playerName?.trim();
-    const playerId = payload?.playerId?.trim();
+  socket.on('room:create', (payload, ack) => {
+    const parsed = parseIdentityPayload(payload);
+    if (!parsed.ok) {
+      ack?.({ ok: false, error: 'Invalid player name or identifier' });
+      return;
+    }
+    const playerName = parsed.value.playerName.trim();
+    const playerId = parsed.value.playerId.trim();
 
     if (!playerName || !playerId || !isValidPlayerId(playerId)) {
         ack?.({ ok: false, error: 'Invalid player name or identifier' });
@@ -1225,12 +1242,17 @@ io.on('connection', (socket) => {
   socket.on(
     'room:join',
     (
-      payload: { roomCode: string; playerName: string; playerId: string },
-      ack?: (response: unknown) => void,
+      payload,
+      ack,
     ) => {
-      const requestedRoomCode = payload?.roomCode?.trim().toUpperCase();
-      const playerName = payload?.playerName?.trim();
-      const playerId = payload?.playerId?.trim();
+      const parsed = parseJoinRoomPayload(payload);
+      if (!parsed.ok) {
+        ack?.({ ok: false, error: 'Invalid room code, name, or identifier' });
+        return;
+      }
+      const requestedRoomCode = parsed.value.roomCode.trim().toUpperCase();
+      const playerName = parsed.value.playerName.trim();
+      const playerId = parsed.value.playerId.trim();
 
       if (!requestedRoomCode || !playerName || !playerId || !isValidPlayerId(playerId)) {
         ack?.({ ok: false, error: 'Invalid room code, name, or identifier' });
@@ -1345,7 +1367,7 @@ io.on('connection', (socket) => {
     },
   );
 
-  socket.on('player:ready', (payload: { ready: boolean }, ack?: (response: unknown) => void) => {
+  socket.on('player:ready', (payload, ack) => {
     const ctx = getSocketContext(socket.id);
     if (!ctx) {
       ack?.({ ok: false, error: 'You are not in a room' });
@@ -1368,10 +1390,15 @@ io.on('connection', (socket) => {
       return;
     }
 
+    const parsed = parseReadyPayload(payload);
+    if (!parsed.ok) {
+      ack?.({ ok: false, error: 'Invalid ready state' });
+      return;
+    }
     const readyDecision = applyRoundReadyRequest(
       ctx.room,
       ctx.player,
-      Boolean(payload?.ready),
+      parsed.value.ready,
       () => markCpuPlayersReady(ctx.room),
     );
     if (!readyDecision.ok) {
@@ -1387,14 +1414,15 @@ io.on('connection', (socket) => {
     ack?.({ ok: true });
   });
 
-  socket.on('room:kick', (payload: { targetPlayerId?: string }, ack?: (response: unknown) => void) => {
+  socket.on('room:kick', (payload, ack) => {
     const ctx = getSocketContext(socket.id);
     if (!ctx) {
       ack?.({ ok: false, error: 'You are not in a room' });
       return;
     }
 
-    const targetPlayerId = payload?.targetPlayerId?.trim();
+    const parsed = parseKickPayload(payload);
+    const targetPlayerId = parsed.ok ? parsed.value.targetPlayerId.trim() : undefined;
     const decision = validateLobbyKickRequest({
       isHost: ctx.room.hostId === ctx.playerId,
       roomStatus: ctx.room.status,
@@ -1426,7 +1454,7 @@ io.on('connection', (socket) => {
     ack?.({ ok: true });
   });
 
-  socket.on('game:start', (ack?: (response: unknown) => void) => {
+  socket.on('game:start', (ack) => {
     const ctx = getSocketContext(socket.id);
     if (!ctx) {
       ack?.({ ok: false, error: 'You are not in a room' });
@@ -1448,7 +1476,7 @@ io.on('connection', (socket) => {
     ack?.({ ok: true });
   });
 
-  socket.on('game:retry', (ack?: (response: unknown) => void) => {
+  socket.on('game:retry', (ack) => {
     const ctx = getSocketContext(socket.id);
     if (!ctx) {
       ack?.({ ok: false, error: 'You are not in a room' });
@@ -1501,11 +1529,15 @@ io.on('connection', (socket) => {
     ack?.({ ok: true });
   });
 
-  socket.on('game:play-card', (payload: { card: number }, ack?: (response: unknown) => void) => {
+  socket.on('game:play-card', (payload, ack) => {
     const ctx = getSocketContext(socket.id);
     if (ctx) {
-      const card = Number(payload?.card);
-      ack?.(playCardInRoom(ctx.room, ctx.roomCode, ctx.player, card));
+      const parsed = parsePlayCardPayload(payload);
+      if (!parsed.ok) {
+        ack?.({ ok: false, error: 'Invalid card' });
+        return;
+      }
+      ack?.(playCardInRoom(ctx.room, ctx.roomCode, ctx.player, parsed.value.card));
       return;
     }
     if (!ctx) {
@@ -1514,7 +1546,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('game:pause-request', (ack?: (response: unknown) => void) => {
+  socket.on('game:pause-request', (ack) => {
     const ctx = getSocketContext(socket.id);
     if (!ctx || !ctx.room.game) {
       ack?.({ ok: false, error: 'Invalid game state' });
@@ -1544,7 +1576,7 @@ io.on('connection', (socket) => {
     ack?.({ ok: true });
   });
 
-  socket.on('star:propose', (ack?: (response: unknown) => void) => {
+  socket.on('star:propose', (ack) => {
     const ctx = getSocketContext(socket.id);
     if (!ctx || !ctx.room.game) {
       ack?.({ ok: false, error: 'Invalid game state' });
@@ -1588,7 +1620,7 @@ io.on('connection', (socket) => {
     ack?.({ ok: true });
   });
 
-  socket.on('star:accept', (ack?: (response: unknown) => void) => {
+  socket.on('star:accept', (ack) => {
     const ctx = getSocketContext(socket.id);
     if (!ctx || !ctx.room.game || !ctx.room.game.starProposal) {
       ack?.({ ok: false, error: 'There is no active star proposal' });
@@ -1627,7 +1659,7 @@ io.on('connection', (socket) => {
     ack?.({ ok: true });
   });
 
-  socket.on('star:cancel', (ack?: (response: unknown) => void) => {
+  socket.on('star:cancel', (ack) => {
     const ctx = getSocketContext(socket.id);
     if (!ctx || !ctx.room.game || !ctx.room.game.starProposal) {
       ack?.({ ok: false, error: 'There is no active star proposal' });
@@ -1660,7 +1692,7 @@ io.on('connection', (socket) => {
     ack?.({ ok: true });
   });
 
-  socket.on('star:reject', (ack?: (response: unknown) => void) => {
+  socket.on('star:reject', (ack) => {
     const ctx = getSocketContext(socket.id);
     if (!ctx || !ctx.room.game || !ctx.room.game.starProposal) {
       ack?.({ ok: false, error: 'There is no active star proposal' });
@@ -1688,7 +1720,7 @@ io.on('connection', (socket) => {
     ack?.({ ok: true });
   });
 
-  socket.on('star:discard-animation-complete', (ack?: (response: unknown) => void) => {
+  socket.on('star:discard-animation-complete', (ack) => {
     const ctx = getSocketContext(socket.id);
     if (!ctx) {
       ack?.({ ok: false, error: 'You are not in a room' });

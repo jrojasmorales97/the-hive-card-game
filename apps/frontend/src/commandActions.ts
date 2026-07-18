@@ -1,20 +1,6 @@
-export type ActionType =
-  | 'ready'
-  | 'unready'
-  | 'round_out_wait'
-  | 'start'
-  | 'play_card'
-  | 'pause'
-  | 'propose_star'
-  | 'accept_star'
-  | 'retry';
-
-export type AvailableAction = {
-  type: ActionType;
-  visible: boolean;
-  enabled: boolean;
-  reason?: string;
-};
+import type { PrivateAction, PrivateActionType } from '@the-hive/contracts';
+export type ActionType = PrivateActionType;
+export type AvailableAction = PrivateAction;
 
 export type CommandAction = {
   key: string;

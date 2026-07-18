@@ -1,0 +1,43 @@
+- main [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e6]:
+      - heading [level=1] [ref=e7]:
+        - img "The Hive" [ref=e8]
+      - paragraph [ref=e9]: No talking | No signaling | In order
+    - generic [ref=e10]:
+      - tablist "Room access" [ref=e11]:
+        - tab "Join room" [selected] [ref=e12] [cursor=pointer]
+        - tab "Create room" [ref=e13] [cursor=pointer]
+      - generic [ref=e14]:
+        - generic [ref=e15]:
+          - text: Name
+          - textbox "Name" [ref=e16]:
+            - /placeholder: Your name
+        - generic [ref=e17]:
+          - text: Room code
+          - textbox "Room code" [ref=e18]:
+            - /placeholder: ABC123
+        - button "Join" [ref=e20] [cursor=pointer]
+    - generic [ref=e21]:
+      - heading "How to play" [level=2] [ref=e22]
+      - region "How to play" [ref=e23]:
+        - generic [ref=e24]:
+          - generic [ref=e25]:
+            - generic [ref=e26]: hub
+            - heading "The Goal" [level=3] [ref=e27]
+          - paragraph [ref=e28]: Play all 100 cards in ascending order as a team - in complete silence. No talking, no signals, no gestures. Only shared instinct.
+        - generic [ref=e29]:
+          - generic [ref=e30]:
+            - generic [ref=e31]: style
+            - heading "Play Your Lowest" [level=3] [ref=e32]
+          - paragraph [ref=e33]: Each round you hold cards. When the timing feels right, play your lowest. If someone plays out of order, the team loses a life and all lower cards are discarded automatically.
+        - generic [ref=e34]:
+          - generic [ref=e35]:
+            - generic [ref=e36]: task_alt
+            - heading "Ready & Pause" [level=3] [ref=e37]
+          - paragraph [ref=e38]: Before each round starts, every player with cards must press Ready. Any player can call a Pause mid-game - the round resumes only when the players who still hold cards mark Ready again.
+        - generic [ref=e39]:
+          - generic [ref=e40]:
+            - generic [ref=e41]: auto_awesome
+            - heading "Lives, Stars & Rewards" [level=3] [ref=e42]
+          - paragraph [ref=e43]: Stars let the whole team discard their lowest card simultaneously. Clearing certain levels earns extra lives or stars as a reward.

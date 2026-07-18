@@ -1,8 +1,5 @@
-export type StarDiscardPreview = {
-  card: number;
-  playerId: string;
-  playerName: string;
-};
+import type { StarDiscardPreview } from '@the-hive/contracts';
+export type { StarDiscardPreview } from '@the-hive/contracts';
 
 export type StarProposalButton = 'propose' | 'cancel' | 'accept' | 'reject';
 

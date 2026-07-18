@@ -3,11 +3,9 @@
   "mcp": {
     "playwright": {
       "type": "local",
-      "command": ["npx", "-y", "@playwright/mcp"],
+      "command": ["npx", "-y", "@playwright/mcp", "--executable-path", "/usr/bin/chromium"],
       "enabled": true,
-      "env": {
-        "BROWSER": "chromium"
-      }
+      "env": {}
     }
   }
 }

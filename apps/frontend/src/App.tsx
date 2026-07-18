@@ -1,6 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 // useLayoutEffect alias - avoids SSR warnings while being semantically clear
 import { io, Socket } from 'socket.io-client';
+import type {
+  ClientToServerEvents,
+  FinalPlayerResult,
+  InteractionLock,
+  PrivateAction,
+  PrivatePlayerEnvelope,
+  PrivatePlayerState,
+  PublicRoomEnvelope,
+  PublicRoomState,
+  RoomSnapshot,
+  ServerToClientEvents,
+  StarDiscardPreview,
+  GamePhase,
+  PileEntry,
+  JoinRoomAck,
+  ResyncAck,
+} from '@the-hive/contracts';
 import { deriveConnectionState, RESYNC_INTERVAL_MS, RESYNC_TIMEOUT_MS, type ConnectionState } from './connectionStatus.js';
 import {
   countdownValueFromRemaining,
@@ -24,13 +41,12 @@ import {
   findMyStarDiscard,
   getStarProposalButtons,
   starDiscardLaunchDelayMs,
-  type StarDiscardPreview,
 } from './starUi.js';
 import { buildHandLayout, buildHandSlotPath, type HandSlotId } from './handLayout.js';
 import { podiumToneForRank, shouldUseTwoColumnFinalScoreLayout, timingFeedbackForBand } from './finalScoreUi.js';
 import { levelCompleteOverlayDelayMs } from './levelFlow.js';
 import { buildLobbySeats, shouldShowTopbarRoomCode, waitingRoomMessage } from './lobbyUi.js';
-import { buildCommandActions, type ActionType, type AvailableAction } from './commandActions.js';
+import { buildCommandActions } from './commandActions.js';
 import logoUrl from '../the-hive-logo.png';
 import {
   DEFEAT_SUBTITLE,
@@ -40,75 +56,11 @@ import {
   overlaySubtitle,
 } from './messageTiming.js';
 
-type Player = {
-  id: string;
-  name: string;
-  connected: boolean;
-  ready: boolean;
-  handCount?: number;
-  isCpu?: boolean;
-};
-
-type GamePhase = 'focus' | 'playing' | 'paused' | 'round-complete' | 'level-complete' | 'game-over' | 'victory';
-
-type InteractionLock = {
-  reason: 'dealing' | 'countdown' | 'error' | 'star' | 'level-complete';
-  until: number;
-};
-
-type RoomState = {
-  code: string;
-  displayCode?: string;
-  shareable?: boolean;
-  hostId: string;
-  status: 'lobby' | 'in-game';
-  players: Player[];
-  logs?: GameLogEvent[];
-  game: {
-    phase: GamePhase;
-    currentLevel: number;
-    maxLevel: number;
-    lives: number;
-    stars: number;
-    pile: number[];
-    pileHistory: PileCard[];
-    lastPlayed: number | null;
-    mode?: 'normal' | 'dev-cpu';
-    interactionLock: InteractionLock | null;
-    finalResults: FinalPlayerResult[] | null;
-    starProposal: { initiatorId: string; acceptedBy: string[] } | null;
-  } | null;
-};
-
-type PrivatePlayerState = {
-  hand: number[];
-  availableActions: AvailableAction[];
-};
-
-type RoomSnapshot = {
-  version: number;
-  serverTime: number;
-  publicState: RoomState;
-  privateState: PrivatePlayerState;
-};
-
-type FinalPlayerResult = {
-  playerId: string;
-  playerName: string;
-  score: number;
-  timingBand: 'sync' | 'slightly-fast' | 'very-fast' | 'slightly-slow' | 'very-slow' | 'unrated';
-  direction: 'fast' | 'slow' | 'steady' | 'unknown';
-  avgDeviationMs: number;
-  errorPenalty: number;
-  errorCount: number;
-  summary: string;
-  roast: string;
-};
-
-type PileCard = {
-  value: number;
-  playerId: string;
-};
+type Player = PublicRoomState['players'][number];
+type RoomState = PublicRoomState;
+type AvailableAction = PrivateAction;
+type ActionType = PrivateAction['type'];
+type PileCard = PileEntry;
 
 type LevelReward = 'life' | 'star' | null;
 
@@ -625,7 +577,7 @@ function HeroSection() {
 }
 
 export function App() {
-  const [socket, setSocket] = useState<Socket | null>(null);
+  const [socket, setSocket] = useState<Socket<ServerToClientEvents, ClientToServerEvents> | null>(null);
   const [playerId, setPlayerId] = useState('');
   const [playerName, setPlayerName] = useState('');
   const [roomCodeInput, setRoomCodeInput] = useState('');
@@ -949,13 +901,13 @@ export function App() {
   useEffect(() => {
     if (!playerId) return;
 
-    const s = io(SOCKET_URL, {
+    const s: Socket<ServerToClientEvents, ClientToServerEvents> = io(SOCKET_URL, {
       transports: ['websocket'],
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 500,
       reconnectionDelayMax: 3000,
-    });
+    }) as Socket<ServerToClientEvents, ClientToServerEvents>;
     setSocket(s);
 
     const performResync = (opts?: { forceUiSyncing?: boolean }) => {
@@ -979,7 +931,7 @@ export function App() {
       }, RESYNC_TIMEOUT_MS);
 
       const joinSentAt = Date.now();
-      s.emit('room:join', { roomCode: targetRoom, playerName: targetName, playerId }, (response: any) => {
+      s.emit('room:join', { roomCode: targetRoom, playerName: targetName, playerId }, (response: JoinRoomAck) => {
         if (!response?.ok) {
           syncInFlightRef.current = false;
           syncHealthyRef.current = false;
@@ -993,7 +945,7 @@ export function App() {
         if (response.snapshot) applyAuthoritativeSnapshot(response.snapshot, { clientSentAt: joinSentAt });
 
         const resyncSentAt = Date.now();
-        s.emit('room:resync', (syncResponse: any) => {
+        s.emit('room:resync', (syncResponse: ResyncAck) => {
           if (!syncResponse?.ok) {
             syncHealthyRef.current = false;
             syncInFlightRef.current = false;
@@ -1039,7 +991,7 @@ export function App() {
       setInfo('Connection lost. Retrying...');
     });
 
-    s.on('reconnect_attempt', () => {
+    (s as Socket).on('reconnect_attempt', () => {
       socketConnectedRef.current = false;
       reconnectingRef.current = true;
       syncHealthyRef.current = false;
@@ -1059,7 +1011,7 @@ export function App() {
       }
     });
 
-    s.on('room:update', (payload: { version: number; serverTime: number; publicState: RoomState }) => {
+    s.on('room:update', (payload: PublicRoomEnvelope) => {
       applyPublicStateFragment(payload);
       if (Array.isArray(payload.publicState.logs)) {
         setGameLog(payload.publicState.logs.slice(-50));
@@ -1070,7 +1022,7 @@ export function App() {
       pushLog(entry);
     });
 
-    s.on('player:state', (payload: { version: number; serverTime: number; privateState: PrivatePlayerState }) => {
+    s.on('player:state', (payload: PrivatePlayerEnvelope) => {
       applyPrivateStateFragment(payload);
     });
 
@@ -1732,7 +1684,7 @@ export function App() {
     previousHandSlotMapRef.current = {};
     pendingLocalPileEntryRef.current = null;
   }
-  function emitWithAck<T = any>(event: string, payload?: unknown): Promise<T> {
+  function emitWithAck<T>(event: keyof ClientToServerEvents, payload?: unknown): Promise<T> {
     return new Promise((resolve) => {
       if (!socket) {
         resolve({ ok: false, error: 'No socket connection' } as T);
@@ -1740,11 +1692,11 @@ export function App() {
       }
 
       if (typeof payload === 'undefined') {
-        socket.emit(event, (response: T) => resolve(response));
+        (socket as Socket).emit(event, (response: T) => resolve(response));
         return;
       }
 
-      socket.emit(event, payload, (response: T) => resolve(response));
+      (socket as Socket).emit(event, payload, (response: T) => resolve(response));
     });
   }
 

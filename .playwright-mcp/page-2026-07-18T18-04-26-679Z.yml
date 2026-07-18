@@ -1,0 +1,114 @@
+- main [ref=e3]:
+  - generic [ref=e128]:
+    - button "Private CPU room CPUON2" [disabled] [ref=e130]:
+      - generic [ref=e131]: CPUON2
+      - generic [ref=e132]: lock
+    - generic [ref=e133]:
+      - button "Log" [ref=e134] [cursor=pointer]:
+        - generic [ref=e135]: notes
+        - text: Log
+      - button "Leave room" [ref=e136] [cursor=pointer]:
+        - generic [ref=e137]: logout
+        - text: Exit
+  - generic [ref=e138]:
+    - generic [ref=e139]:
+      - generic [ref=e140]:
+        - article [ref=e141]:
+          - generic [ref=e142]:
+            - generic "Playing" [ref=e254]: style
+            - generic "CPU player" [ref=e144]: CPU
+            - strong [ref=e145]: CPU 1
+            - generic [ref=e146]: x2
+          - generic [ref=e147]:
+            - generic [ref=e148]: DONE
+            - strong [ref=e149]: CPU 1
+        - article [ref=e150]:
+          - generic [ref=e151]:
+            - generic "Playing" [ref=e255]: style
+            - generic "CPU player" [ref=e153]: CPU
+            - strong [ref=e154]: CPU 2
+            - generic [ref=e155]: x2
+          - generic [ref=e156]:
+            - generic [ref=e157]: DONE
+            - strong [ref=e158]: CPU 2
+        - article [ref=e237]:
+          - generic [ref=e160]:
+            - generic "Playing" [ref=e256]: style
+            - generic "Host" [ref=e162]: crown
+            - strong [ref=e163]: Playwright
+            - generic [ref=e164]: x1
+          - generic [ref=e165]:
+            - generic [ref=e166]: DONE
+            - strong [ref=e167]: Playwright
+        - button "Center pile. Open game log" [ref=e168] [cursor=pointer]:
+          - article [ref=e262]:
+            - generic [ref=e263]: "8"
+            - generic [ref=e264]: "8"
+            - generic [ref=e265]: "8"
+          - generic "Round reward" [ref=e239]:
+            - generic [ref=e240]: Reward
+            - generic [ref=e241]: star
+      - generic [ref=e170]:
+        - generic [ref=e171]:
+          - generic "Player resources" [ref=e173]:
+            - generic [ref=e174]:
+              - strong [ref=e175]:
+                - generic [ref=e176]: favorite
+                - text: Lives
+              - text: "3"
+            - generic [ref=e177]:
+              - strong [ref=e178]:
+                - generic [ref=e179]: star
+                - text: Stars
+              - text: "1"
+            - generic [ref=e180]:
+              - strong [ref=e181]:
+                - generic [ref=e182]: floor
+                - text: Level
+              - text: 2/10
+          - generic [ref=e183]:
+            - button "Propose star" [ref=e258] [cursor=pointer]:
+              - generic [ref=e259]: star
+              - text: Propose star
+            - button "Pause" [ref=e260] [cursor=pointer]:
+              - generic [ref=e261]: pause
+              - text: Pause
+        - generic [ref=e187]:
+          - generic "Upcoming cards" [ref=e188]
+          - button "100 100 100" [active] [ref=e266] [cursor=pointer]:
+            - generic [ref=e246]: "100"
+            - generic [ref=e247]: "100"
+            - generic [ref=e248]: "100"
+    - complementary "Game log":
+      - generic:
+        - strong: Game log
+        - button "Close game log":
+          - generic: close
+      - generic:
+        - article:
+          - generic: style
+          - paragraph: Playwright played 8
+        - article:
+          - generic: play_lesson
+          - paragraph: Round 2 ready
+        - article:
+          - generic: task_alt
+          - paragraph: Level 1 cleared
+        - article:
+          - generic: style
+          - paragraph: CPU 2 played 93
+        - article:
+          - generic: style
+          - paragraph: CPU 1 played 66
+        - article:
+          - generic: style
+          - paragraph: Playwright played 5
+        - article:
+          - generic: play_arrow
+          - paragraph: Game started
+        - article:
+          - generic: person_add
+          - paragraph: Playwright joined the room
+        - article:
+          - generic: crown
+          - paragraph: Playwright is now host

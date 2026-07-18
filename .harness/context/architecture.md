@@ -19,6 +19,7 @@
 
 - `apps/backend/`: servicio Node del juego; `src/index.ts` es el entrypoint y los demas archivos son helpers/test.
 - `apps/frontend/`: cliente Vite; `src/main.tsx` arranca la app, `src/App.tsx` concentra la UI principal y `src/styles.css` el estilo global.
+- `packages/contracts/`: paquete ESM local `@the-hive/contracts`, fuente canónica de wire types, parsers runtime y mapas Socket.IO. Se divide por estado, acciones, logs y familias de eventos; no contiene estado interno ni reglas de juego.
 - `.harness/`: artefactos SDD y templates de regeneracion (`templates/`, `context/`, `plans/`, `implementations/`, `reviews/`).
 - `.opencode/`: configuracion local de agentes, comandos y skills; la skill de proyecto observada es `ux-ui-design`.
 - Raiz del repo: documentos de contexto (`README.md`, `business.md`, `architecture.md`) y orquestacion (`docker-compose.yml`, `render.yaml`).
@@ -31,6 +32,7 @@
 - Frontend con `moduleResolution: Bundler`, `jsx: react-jsx` y `noEmit: true`. Fuente: `apps/frontend/tsconfig.json`.
 - Aplicaciones principales de archivo unico con helpers extraidos, sin router ni libreria externa de estado global. Fuente: `apps/frontend/src/App.tsx`, `apps/frontend/package.json`, arbol `apps/frontend/src/`.
 - Estado publico y privado separados explicitamente: el backend emite `room:update`, `player:state` y `room:snapshot`; el frontend recompone los fragmentos con `roomSync.ts`. Fuente: `apps/backend/src/index.ts`, `apps/frontend/src/roomSync.ts`.
+- Las fronteras Socket.IO importan `ClientToServerEvents`/`ServerToClientEvents` desde `@the-hive/contracts`; el backend valida payloads externos con parsers antes de aplicar reglas. Eventos reservados de Socket.IO no pertenecen a esos mapas.
 - Tests junto al codigo que validan helpers puros y reglas aisladas. Fuente: `apps/backend/src/*.test.ts`, `apps/frontend/src/*.test.ts`.
 - No aplica: no se observaron scripts de linting ni formateo declarados en los manifests inspeccionados. Fuente: `apps/backend/package.json`, `apps/frontend/package.json`.
 
@@ -57,6 +59,7 @@
 - Evitar exponer manos privadas en `room:update`; el estado publico solo contiene `handCount`. Fuente: `serializeRoom()` en `apps/backend/src/index.ts`.
 - Evitar que el cliente derive solo por su cuenta el estado de sala; el backend envia snapshots y acciones privadas ya autorizadas. Fuente: `createRoomSnapshot()` en `apps/backend/src/index.ts`, `buildPrivateActions()` en `apps/backend/src/privateState.ts`.
 - Evitar dependencias de orquestacion innecesarias en desarrollo local; el flujo soportado sigue siendo `docker compose`, no scripts raiz adicionales. Fuente: `README.md`, `docker-compose.yml`.
+- Docker Compose y Render construyen `packages/contracts` desde la raíz antes de cada aplicación; ambas apps lo declaran mediante `file:../../packages/contracts`, sin workspace raíz ni registry externo.
 - Evitar documentar dependencias transitivas como contrato del proyecto; esta regeneracion lista solo dependencias directas declaradas en los manifests de cada app.
 
 # Paquetes instalados
