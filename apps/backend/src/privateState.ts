@@ -1,4 +1,5 @@
 import type { InteractionLockReason, PrivateAction, PrivateActionType } from '@the-hive/contracts';
+import { commandDecision, type MachineState } from './gameStateMachine.js';
 export type { InteractionLockReason, PrivateAction, PrivateActionType } from '@the-hive/contracts';
 
 export type PrivateActionContext = {
@@ -14,11 +15,15 @@ export type PrivateActionContext = {
   stars: number;
   hasStarProposal: boolean;
   alreadyAcceptedStar: boolean;
+  isStarProposalInitiator: boolean;
   isRoundReadyParticipant: boolean;
   isActiveRoundParticipant: boolean;
   canParticipateInStarConsensus: boolean;
   inRoundReadyWindow: boolean;
   canRetry: boolean;
+  /** Runtime callers provide the same snapshot used by command handlers. */
+  machineState?: MachineState;
+  now?: number;
 };
 
 function blockedReason(lockReason: InteractionLockReason | null): string {
@@ -43,10 +48,12 @@ export function buildPrivateActions(ctx: PrivateActionContext): PrivateAction[] 
   const pauseVisible = ctx.phase === 'playing' && ctx.isActiveRoundParticipant;
   const proposeStarVisible = ctx.phase === 'playing' && ctx.isActiveRoundParticipant;
   const acceptStarVisible = ctx.phase === 'playing' && ctx.canParticipateInStarConsensus && ctx.hasStarProposal;
+  const cancelStarVisible = ctx.phase === 'playing' && ctx.hasStarProposal && ctx.isStarProposalInitiator;
+  const rejectStarVisible = ctx.phase === 'playing' && ctx.hasStarProposal && !ctx.isStarProposalInitiator && ctx.canParticipateInStarConsensus;
   const retryVisible = ctx.isHost && ctx.canRetry;
   const lockReason = ctx.interactionLocked ? blockedReason(ctx.interactionLockReason) : undefined;
 
-  return [
+  const actions = [
     action('ready', readyVisible, readyVisible && !ctx.interactionLocked, readyVisible && ctx.interactionLocked ? lockReason : undefined),
     action(
       'unready',
@@ -103,6 +110,29 @@ export function buildPrivateActions(ctx: PrivateActionContext): PrivateAction[] 
             : undefined
         : undefined,
     ),
+    action('cancel_star', cancelStarVisible, cancelStarVisible && !ctx.interactionLocked, cancelStarVisible && ctx.interactionLocked ? lockReason : undefined),
+    action('reject_star', rejectStarVisible, rejectStarVisible && !ctx.interactionLocked, rejectStarVisible && ctx.interactionLocked ? lockReason : undefined),
     action('retry', retryVisible, retryVisible, retryVisible ? undefined : 'Only the host can retry'),
   ];
+
+  if (!ctx.machineState) return actions;
+
+  const commands: Partial<Record<PrivateActionType, Parameters<typeof commandDecision>[1]>> = {
+    start: 'start', ready: 'ready', unready: 'unready', play_card: 'play', pause: 'pause',
+    propose_star: 'propose-star', accept_star: 'accept-star', cancel_star: 'cancel-star',
+    reject_star: 'reject-star', retry: 'retry',
+  };
+  return actions.map((current) => {
+    const command = commands[current.type];
+    if (!command || !current.visible) return current;
+    const snapshot = command === 'play'
+      ? { ...ctx.machineState!, card: ctx.machineState!.players.find((player) => player.id === ctx.machineState!.actorId)?.hand[0] }
+      : ctx.machineState!;
+    const decision = commandDecision(snapshot, command, ctx.now ?? Date.now());
+    // An already-recorded vote remains idempotent on the wire but is not an actionable UI command.
+    if (current.type === 'accept_star' && ctx.alreadyAcceptedStar) return current;
+    return decision.ok
+      ? { ...current, enabled: true, reason: undefined }
+      : { ...current, enabled: false, reason: decision.error };
+  });
 }

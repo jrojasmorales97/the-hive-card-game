@@ -661,7 +661,7 @@ Validacion:
 | 00 Contexto del proyecto | Completada | Indice, dominio y arquitectura con ownership claro |
 | 01 Baseline | Completada | Caracterizacion Socket.IO, contexto baseline y tests Docker validados; evidencia: `.harness/implementations/2026-07-18/0.1-caracterizar-el-baseline-realtime-de-the-hive-con-tests-socket-io-y-contexto-actualizado-sin-cambiar-comportamiento-funcional-attempt-2.md` |
 | 02 Contratos | Completada | Contratos compartidos, validación runtime y privacidad verificadas; evidencia: `.harness/implementations/2026-07-18/0.2-centralizar-y-validar-los-contratos-socket-io-compartidos-de-the-hive-sin-cambiar-el-comportamiento-observable.md` |
-| 03 Estados | Pendiente | Fases e invariantes canonicas |
+| 03 Estados | Completada | Maquina de estados, transiciones, locks, capacidades y Mermaid validados; evidencia: `.harness/implementations/2026-07-19/0.3-hacer-explicita-la-maquina-de-estados-de-the-hive-antes-de-extraer-el-dominio-attempt-2.md` |
 | 04 Dominio | Bloqueada por 03 | Reglas puras sin duplicacion |
 | 05 Aplicacion | Bloqueada por 04 | Casos de uso sin transporte |
 | 06 Infraestructura | Bloqueada por 05 | Efectos encapsulados |

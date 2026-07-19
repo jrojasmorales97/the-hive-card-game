@@ -1,8 +1,6 @@
-import type { PrivateAction, PrivateActionType } from '@the-hive/contracts';
-export type ActionType = PrivateActionType;
-export type AvailableAction = PrivateAction;
+import type { PrivateAction } from '@the-hive/contracts';
 
-export type CommandAction = {
+type CommandAction = {
   key: string;
   label: string;
   icon: string;
@@ -11,13 +9,15 @@ export type CommandAction = {
 };
 
 type BuildCommandActionsInput = {
-  readyAction?: AvailableAction;
-  unreadyAction?: AvailableAction;
-  roundOutWaitAction?: AvailableAction;
-  startAction?: AvailableAction;
-  pauseAction?: AvailableAction;
-  proposeStarAction?: AvailableAction;
-  acceptStarAction?: AvailableAction;
+  readyAction?: PrivateAction;
+  unreadyAction?: PrivateAction;
+  roundOutWaitAction?: PrivateAction;
+  startAction?: PrivateAction;
+  pauseAction?: PrivateAction;
+  proposeStarAction?: PrivateAction;
+  acceptStarAction?: PrivateAction;
+  cancelStarAction?: PrivateAction;
+  rejectStarAction?: PrivateAction;
   showCancelStar: boolean;
   showAcceptStar: boolean;
   showRejectStar: boolean;
@@ -25,8 +25,9 @@ type BuildCommandActionsInput = {
   showHivePlaceholder: boolean;
   placeholderLabel: string;
   readyOverlayBlocked: boolean;
-  isPlaying: boolean;
-  interactionBlocked: boolean;
+  /** Presentation-only legacy inputs; command authorization never reads them. */
+  isPlaying?: boolean;
+  interactionBlocked?: boolean;
   isInGame: boolean;
   phase: string | null;
 };
@@ -56,7 +57,7 @@ export function buildCommandActions(input: BuildCommandActionsInput): CommandAct
           label: 'Retirar propuesta',
           icon: 'star',
           className: 'command-button star full-span',
-          disabled: !input.isPlaying || input.interactionBlocked,
+          disabled: !input.cancelStarAction?.enabled,
         }
       : null,
     input.showAcceptStar
@@ -74,7 +75,7 @@ export function buildCommandActions(input: BuildCommandActionsInput): CommandAct
           label: 'Reject star',
           icon: 'close',
           className: 'command-button secondary',
-          disabled: !input.isPlaying || input.interactionBlocked,
+          disabled: !input.rejectStarAction?.enabled,
         }
       : null,
     input.showProposeStar

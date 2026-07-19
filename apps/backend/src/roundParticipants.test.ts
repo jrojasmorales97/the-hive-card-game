@@ -7,6 +7,11 @@ import {
   getConnectedConsensusParticipants,
   hasAllReadyForRound,
   isActiveRoundParticipant,
+  isConsensusParticipant,
+  isPauseParticipant,
+  isPlayParticipant,
+  isReadyParticipant,
+  isStarSettlementParticipant,
   isRoundReadyParticipant,
   PAUSE_READY_MESSAGE,
   pauseRoundForReady,
@@ -159,4 +164,20 @@ test('pause message states that only players carrying cards must ready up', () =
     by: 'player-1',
     message: PAUSE_READY_MESSAGE,
   });
+});
+
+test('named eligibility policies keep ready, play, pause, consensus and settlement distinct', () => {
+  const room = buildRoom({
+    active: { connected: true, hand: [12], ready: false },
+    empty: { connected: true, hand: [], ready: false },
+    offline: { connected: false, hand: [42], ready: false },
+  }, 'paused');
+  assert.equal(isReadyParticipant(room, room.players.active), true);
+  assert.equal(isReadyParticipant(room, room.players.empty), false);
+  assert.equal(isPlayParticipant(room, room.players.active), true);
+  assert.equal(isPauseParticipant(room, room.players.empty), false);
+  assert.equal(isConsensusParticipant(room.players.empty), true);
+  assert.equal(isConsensusParticipant(room.players.offline), false);
+  assert.equal(isStarSettlementParticipant(room.players.empty), false);
+  assert.equal(isStarSettlementParticipant(room.players.offline), true);
 });

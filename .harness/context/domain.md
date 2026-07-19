@@ -60,3 +60,35 @@ The Hive es una implementacion web de un juego cooperativo de cartas en tiempo r
 | Bloqueo de interaccion | Ventana temporal donde acciones como ready, jugar o estrella se rechazan por transicion activa. | `apps/backend/src/gameTiming.ts`, `apps/backend/src/index.ts` (`hasActiveInteractionLock`) |
 | Snapshot de sala | Envelope versionado que combina `publicState` y `privateState` para mantener sincronizado al cliente. | `apps/backend/src/index.ts` (`createRoomSnapshot`), `apps/frontend/src/roomSync.ts` |
 | Modo dev-cpu | Variante de desarrollo donde el backend agrega jugadores CPU y programa sus jugadas automaticamente. | `apps/backend/src/index.ts` (`parseCpuRoomCode`, `createCpuRoom`, `scheduleCpuTurn`) |
+
+# Maquina de estados de partida
+
+La fuente canónica de autorización es `apps/backend/src/gameStateMachine.ts`. Las fases son públicas; locks y settlement de estrella son ejes ortogonales y no fases adicionales. La UI presenta fases, locks y animaciones, pero solo las capacidades privadas autorizan comandos.
+
+| Fase | Significado e invariantes | Acciones de dominio |
+| --- | --- | --- |
+| `focus` | Cartas repartidas; ready solo incluye conectados con cartas. | ready/unready; el quórum inicia countdown. |
+| `playing` | Ronda activa sin turnos; jugar exige la carta mínima propia. | play, pause, propuesta/voto de estrella. |
+| `paused` | Reconcentración; solo quienes conservan cartas vuelven a ready. | ready/unready. |
+| `round-complete` | Ventana de cierre de cartas agotadas. | solo transición temporizada. |
+| `level-complete` | Nivel resuelto y recompensa aplicada. | solo avance temporizado o victoria. |
+| `game-over` / `victory` | Partida terminal con resultados finales. | retry por host (el protocolo conserva compatibilidad fuera de la ventana visual). |
+
+Políticas independientes: ready y juego/pausa usan conectados con cartas; consenso incluye todo conectado, incluso sin cartas; settlement considera a cualquiera que tenga cartas, aun si está desconectado. Inicio sigue siendo manual por host con dos conectados, sin exigir ready.
+
+```mermaid
+stateDiagram-v2
+  [*] --> focus: start / retry
+  focus --> playing: ready quorum + countdown
+  playing --> paused: pause or error / star settlement
+  paused --> playing: ready quorum + countdown
+  playing --> round_complete: cards exhausted [timed]
+  round_complete --> level_complete: close round [timed]
+  level_complete --> focus: next level [timed]
+  level_complete --> victory: final level
+  playing --> game_over: no lives after error [timed]
+  game_over --> focus: retry
+  victory --> focus: retry
+```
+
+Las aristas temporizadas se validan contra la fase y lock/deadline esperados; callbacks obsoletos no cambian la partida.

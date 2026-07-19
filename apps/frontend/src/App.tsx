@@ -1502,6 +1502,8 @@ export function App() {
   const pauseAction = actionFor('pause');
   const proposeStarAction = actionFor('propose_star');
   const acceptStarAction = actionFor('accept_star');
+  const cancelStarAction = actionFor('cancel_star');
+  const rejectStarAction = actionFor('reject_star');
   const roundOutWaitAction = actionFor('round_out_wait');
   const readyOverlayBlocked = eventOverlay?.kind === 'level-complete';
   const prepLabel =
@@ -1617,6 +1619,8 @@ export function App() {
     pauseAction,
     proposeStarAction,
     acceptStarAction,
+    cancelStarAction,
+    rejectStarAction,
     showCancelStar,
     showAcceptStar,
     showRejectStar,
@@ -1624,8 +1628,6 @@ export function App() {
     showHivePlaceholder: showHivePlaceholder || showRoundClearingPlaceholder,
     placeholderLabel,
     readyOverlayBlocked,
-    isPlaying,
-    interactionBlocked,
     isInGame: room?.status === 'in-game',
     phase: game?.phase ?? null,
   }).map((action) => ({
@@ -1869,8 +1871,8 @@ export function App() {
 
   function cancelStarProposal() {
     setError('');
-    if (!showCancelStar || !isPlaying || interactionBlocked) {
-      setError('Could not cancel star proposal');
+    if (!cancelStarAction?.enabled) {
+      setError(cancelStarAction?.reason ?? 'Could not cancel star proposal');
       return;
     }
     if (!socket) return;
@@ -1881,8 +1883,8 @@ export function App() {
 
   function rejectStar() {
     setError('');
-    if (!showRejectStar || !isPlaying || interactionBlocked) {
-      setError('Could not reject star');
+    if (!rejectStarAction?.enabled) {
+      setError(rejectStarAction?.reason ?? 'Could not reject star');
       return;
     }
     if (!socket) return;

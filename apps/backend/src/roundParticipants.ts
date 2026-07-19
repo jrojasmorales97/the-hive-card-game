@@ -1,4 +1,6 @@
-export type RoundReadyPhase = 'focus' | 'playing' | 'paused' | 'round-complete' | 'level-complete' | 'game-over' | 'victory' | null;
+import type { GamePhase } from '@the-hive/contracts';
+
+export type RoundReadyPhase = GamePhase | null;
 
 export type RoundReadyPlayer = {
   connected: boolean;
@@ -21,6 +23,31 @@ export function createPauseEventPayload(version: number, playerId: string) {
 
 export function isConnectedConsensusParticipant<TPlayer extends RoundReadyPlayer>(player: TPlayer): boolean {
   return player.connected;
+}
+
+/** Named policy: only connected players still carrying cards ready a round. */
+export function isReadyParticipant<TPlayer extends RoundReadyPlayer>(room: RoundReadyRoom<TPlayer>, player: TPlayer): boolean {
+  return isRoundReadyParticipant(room, player);
+}
+
+/** Named policy: a player with a card can issue play commands during a round. */
+export function isPlayParticipant<TPlayer extends RoundReadyPlayer>(room: RoundReadyRoom<TPlayer>, player: TPlayer): boolean {
+  return isActiveRoundParticipant(room, player);
+}
+
+/** Named policy: pause uses the same current-round population as play, deliberately not consensus. */
+export function isPauseParticipant<TPlayer extends RoundReadyPlayer>(room: RoundReadyRoom<TPlayer>, player: TPlayer): boolean {
+  return isActiveRoundParticipant(room, player);
+}
+
+/** Named policy: star votes include connected players even if their hand is empty. */
+export function isConsensusParticipant<TPlayer extends RoundReadyPlayer>(player: TPlayer): boolean {
+  return isConnectedConsensusParticipant(player);
+}
+
+/** Named policy: a star settlement removes one card from every player who has one. */
+export function isStarSettlementParticipant<TPlayer extends RoundReadyPlayer>(player: TPlayer): boolean {
+  return player.hand.length > 0;
 }
 
 export function isRoundParticipationPhase(phase: RoundReadyPhase): boolean {

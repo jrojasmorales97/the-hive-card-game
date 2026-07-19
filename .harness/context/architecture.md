@@ -62,6 +62,14 @@
 - Docker Compose y Render construyen `packages/contracts` desde la raíz antes de cada aplicación; ambas apps lo declaran mediante `file:../../packages/contracts`, sin workspace raíz ni registry externo.
 - Evitar documentar dependencias transitivas como contrato del proyecto; esta regeneracion lista solo dependencias directas declaradas en los manifests de cada app.
 
+# Maquina de estados autoritativa
+
+- `apps/backend/src/gameStateMachine.ts` es la fuente única pura para aceptar o rechazar triggers de partida. Importa únicamente el vocabulario wire (`RoomStatus`, `GamePhase`, locks) desde contratos y recibe un snapshot mínimo, actor y reloj inyectado.
+- La API `evaluateGameTransition()` devuelve una decisión discriminada, patch de fase/lock y effects temporales declarativos; no usa Socket.IO, Maps, timers reales ni estado visual. Los handlers de `index.ts` adaptan el estado en memoria, aplican mutaciones de cartas/vidas/recompensas y programan infraestructura.
+- Los triggers incluyen entrada, ready/countdown, juego/pausa/error, consenso de estrella, cierre de ronda/nivel, terminales, retry y expiraciones. Un callback temporal debe conservar fase, motivo de lock y deadline esperados para ignorarse tras retry, reemplazo de lock o eliminación de sala.
+- `roundParticipants.ts` publica políticas nombradas: ready, play, pause, consensus y settlement. No debe introducirse un predicado genérico que cambie sus poblaciones.
+- `buildPrivateActions()` proyecta capacidades privadas autorizadas, incluidas cancelación y rechazo de estrella. Frontend usa `enabled` para emitir comandos; fase, lock, `Date.now()` y overlays permanecen exclusivamente como presentación.
+
 # Paquetes instalados
 
 | Paquete | Tipo | Proposito | Fuente |

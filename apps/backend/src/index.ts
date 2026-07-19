@@ -11,6 +11,8 @@ import type {
   PublicRoomState,
   RoomSnapshot,
   ServerToClientEvents,
+  GamePhase,
+  RoomStatus,
 } from '@the-hive/contracts';
 import {
   parseIdentityPayload,
@@ -53,7 +55,8 @@ import {
   previewLowestCardPerPlayer,
 } from './gameTiming.js';
 import { nextLevelAdvanceDelayMs, nextLevelReadyLockMs } from './levelFlow.js';
-import { resolveRoomJoin, validateLobbyKickRequest, validateLobbyStartRequest } from './lobbyRules.js';
+import { resolveRoomJoin, validateLobbyKickRequest } from './lobbyRules.js';
+import { evaluateGameTransition, type GameTrigger, type MachineState, type TransitionDecision } from './gameStateMachine.js';
 
 type Player = {
   id: string;
@@ -80,7 +83,7 @@ type PileEntry = {
 };
 
 type GameState = {
-  phase: 'focus' | 'playing' | 'paused' | 'round-complete' | 'level-complete' | 'game-over' | 'victory';
+  phase: GamePhase;
   currentLevel: number;
   maxLevel: number;
   lives: number;
@@ -103,7 +106,7 @@ type Room = {
   shareable?: boolean;
   hostId: string;
   players: Record<string, Player>;
-  status: 'lobby' | 'in-game';
+  status: RoomStatus;
   game: GameState | null;
   version: number;
   logs: GameLogEvent[];
@@ -184,10 +187,6 @@ function createUniqueRoomCode(): string {
 }
 
 function serializeRoom(room: Room): PublicRoomState {
-  if (room.game && !isInteractionLockActive(room.game.interactionLock)) {
-    room.game.interactionLock = null;
-  }
-
   const players = Object.values(room.players).map((player) => ({
     id: player.id,
     name: player.name,
@@ -250,11 +249,14 @@ function buildPrivateState(room: Room, player: Player): PrivatePlayerState {
       stars: room.game?.stars ?? 0,
       hasStarProposal: Boolean(room.game?.starProposal),
       alreadyAcceptedStar: Boolean(room.game?.starProposal?.acceptedBy.has(player.id)),
+      isStarProposalInitiator: room.game?.starProposal?.initiatorId === player.id,
       isRoundReadyParticipant: isRoundReadyParticipant(room, player),
       isActiveRoundParticipant: isActiveRoundParticipant(room, player),
       canParticipateInStarConsensus: player.connected,
       inRoundReadyWindow: Boolean(room.game && (room.game.phase === 'focus' || room.game.phase === 'paused')),
       canRetry: Boolean(room.game && (room.game.phase === 'victory' || room.game.phase === 'game-over') && room.hostId === player.id),
+      machineState: createMachineState(room, player),
+      now: Date.now(),
     }),
   };
 }
@@ -432,9 +434,53 @@ function clearPendingStarResolution(roomCode: string) {
 
 function hasActiveInteractionLock(room: Room): boolean {
   if (!room.game) return false;
-  if (isInteractionLockActive(room.game.interactionLock)) return true;
-  room.game.interactionLock = null;
-  return false;
+  return isInteractionLockActive(room.game.interactionLock);
+}
+
+/** Adapter from in-memory state to the pure state-machine snapshot. */
+function evaluateRoomTransition(room: Room, player: Player, trigger: GameTrigger, now = Date.now(), card?: number) {
+  return evaluateGameTransition(createMachineState(room, player, card), trigger, now);
+}
+
+function createMachineState(room: Room, player: Player, card?: number): MachineState {
+  const game = room.game;
+  return {
+    roomStatus: room.status,
+    phase: game?.phase ?? null,
+    lock: game?.interactionLock ?? null,
+    lives: game?.lives ?? 0,
+    stars: game?.stars ?? 0,
+    hasStarProposal: Boolean(game?.starProposal),
+    starInitiatorId: game?.starProposal?.initiatorId ?? null,
+    acceptedStarBy: game?.starProposal ? [...game.starProposal.acceptedBy] : [],
+    isHost: room.hostId === player.id,
+    actorId: player.id,
+    players: Object.values(room.players).map((entry) => ({
+      id: entry.id,
+      connected: entry.connected,
+      ready: entry.ready,
+      hand: [...entry.hand],
+      isCpu: entry.isCpu,
+    })),
+    card,
+  };
+}
+
+function applyTransition(room: Room, decision: TransitionDecision): boolean {
+  if (!decision.ok) return false;
+  if (decision.patch.roomStatus !== undefined) room.status = decision.patch.roomStatus;
+  if (!room.game) return true;
+  if (decision.patch.phase !== undefined) room.game.phase = decision.patch.phase;
+  if (decision.patch.lock !== undefined) room.game.interactionLock = decision.patch.lock;
+  return true;
+}
+
+function timedTriggerForLock(reason: InteractionLock['reason']): Extract<GameTrigger, 'dealing-expired' | 'countdown-expired' | 'error-expired' | 'star-settled' | 'level-ready-expired'> {
+  if (reason === 'dealing') return 'dealing-expired';
+  if (reason === 'countdown') return 'countdown-expired';
+  if (reason === 'error') return 'error-expired';
+  if (reason === 'star') return 'star-settled';
+  return 'level-ready-expired';
 }
 
 function setInteractionLock(
@@ -458,9 +504,11 @@ function setInteractionLock(
     if (!latestRoom?.game || latestRoom !== room) return;
 
     const activeLock = latestRoom.game.interactionLock;
-    if (activeLock && (activeLock.reason !== lock.reason || activeLock.until !== lock.until)) return;
-
-    latestRoom.game.interactionLock = null;
+    if (!activeLock || activeLock.reason !== lock.reason || activeLock.until !== lock.until) return;
+    const systemPlayer = latestRoom.players[latestRoom.hostId];
+    if (!systemPlayer) return;
+    const decision = evaluateRoomTransition(latestRoom, systemPlayer, timedTriggerForLock(lock.reason), Math.max(Date.now(), lock.until));
+    if (!applyTransition(latestRoom, decision)) return;
     onRelease?.(latestRoom);
     emitRoomUpdate(roomCode);
   }, scaledDurationMs);
@@ -474,9 +522,6 @@ function beginRoundCountdown(room: Room, roomCode: string) {
   clearCpuTurn(roomCode);
   setInteractionLock(room, roomCode, 'countdown', ROUND_COUNTDOWN_DELAY_MS, (latestRoom) => {
     if (!latestRoom.game) return;
-    if (latestRoom.game.phase !== 'focus' && latestRoom.game.phase !== 'paused') return;
-
-    latestRoom.game.phase = 'playing';
     Object.values(latestRoom.players).forEach((player) => {
       player.ready = false;
     });
@@ -532,10 +577,8 @@ function startGameInRoom(room: Room, roomCode: string) {
   dealLevel(room, false);
   setInteractionLock(room, roomCode, 'dealing', getDealLockDuration(room.game.currentLevel), (latestRoom) => {
     if (!latestRoom.game) return;
-    if (latestRoom.game.phase !== 'focus') return;
     if (hasAllReadyForRound(latestRoom)) beginRoundCountdown(latestRoom, roomCode);
   });
-  room.game.phase = 'focus';
   emitRoomUpdate(roomCode);
   io.to(roomCode).emit('game:started', {
     version: room.version,
@@ -656,14 +699,14 @@ function completeLevelOrGame(room: Room, roomCode: string) {
     nextLevelTimers.delete(roomCode);
     const latestRoom = rooms.get(roomCode);
     if (!latestRoom || latestRoom !== room || !latestRoom.game) return;
-    if (latestRoom.game.phase !== 'level-complete') return;
+    const systemPlayer = latestRoom.players[latestRoom.hostId];
+    if (!systemPlayer || !applyTransition(latestRoom, evaluateRoomTransition(latestRoom, systemPlayer, 'next-level-expired'))) return;
 
     latestRoom.game.currentLevel += 1;
     dealLevel(latestRoom);
     const nextLevelLockMs = nextLevelReadyLockMs(LEVEL_COMPLETE_LOCK_MS, getDealLockDuration(latestRoom.game.currentLevel));
     setInteractionLock(latestRoom, roomCode, 'level-complete', nextLevelLockMs, () => {
       if (!latestRoom.game) return;
-      if (latestRoom.game.phase !== 'focus') return;
       if (hasAllReadyForRound(latestRoom)) beginRoundCountdown(latestRoom, roomCode);
     });
     emitRoomUpdate(roomCode);
@@ -681,9 +724,8 @@ function scheduleLevelCompletionAfterRoundOut(room: Room, roomCode: string) {
 
     const latestRoom = rooms.get(roomCode);
     if (!latestRoom?.game || latestRoom !== room || countRemainingCards(latestRoom) !== 0) return;
-    if (latestRoom.game.phase !== 'playing' && latestRoom.game.phase !== 'paused') return;
-
-    latestRoom.game.phase = 'round-complete';
+    const systemPlayer = latestRoom.players[latestRoom.hostId];
+    if (!systemPlayer || !applyTransition(latestRoom, evaluateRoomTransition(latestRoom, systemPlayer, 'round-flip-expired'))) return;
     emitRoomUpdate(roomCode);
 
     const unflipTimer = setTimeout(() => {
@@ -691,7 +733,8 @@ function scheduleLevelCompletionAfterRoundOut(room: Room, roomCode: string) {
 
       const finalRoom = rooms.get(roomCode);
       if (!finalRoom?.game || finalRoom !== room || countRemainingCards(finalRoom) !== 0) return;
-      if (finalRoom.game.phase !== 'round-complete') return;
+      const finalSystemPlayer = finalRoom.players[finalRoom.hostId];
+      if (!finalSystemPlayer || !applyTransition(finalRoom, evaluateRoomTransition(finalRoom, finalSystemPlayer, 'round-unflip-expired'))) return;
 
       completeLevelOrGame(finalRoom, roomCode);
       emitRoomUpdate(roomCode);
@@ -711,30 +754,9 @@ function resolveErrorAndDiscard(room: Room, playedCard: number) {
 }
 
 function playCardInRoom(room: Room, roomCode: string, player: Player, card: number): { ok: true } | { ok: false; error: string } {
-  if (!room.game) {
-    return { ok: false, error: 'Invalid game state' };
-  }
-
-  if (hasActiveInteractionLock(room)) {
-    return { ok: false, error: 'Wait until the current transition finishes' };
-  }
-
-  if (room.game.phase !== 'playing') {
-    return { ok: false, error: 'The round is not active' };
-  }
-
-  if (!Number.isInteger(card)) {
-    return { ok: false, error: 'Invalid card' };
-  }
-
-  if (!player.hand.includes(card)) {
-    return { ok: false, error: 'You do not have that card' };
-  }
-
-  const minCard = Math.min(...player.hand);
-  if (card !== minCard) {
-    return { ok: false, error: 'You must play your lowest card first' };
-  }
+  const transition = evaluateRoomTransition(room, player, 'play', Date.now(), card);
+  if (!transition.ok) return { ok: false, error: transition.error };
+  if (!room.game) return { ok: false, error: 'Invalid game state' };
 
   player.hand = player.hand.filter((value) => value !== card);
   const playedAt = Date.now();
@@ -964,6 +986,8 @@ function acknowledgeStarDiscardAnimation(roomCode: string, playerId: string) {
   const room = rooms.get(roomCode);
   const pending = pendingStarResolutions.get(roomCode);
   if (!room || !pending) return false;
+  const player = room.players[playerId];
+  if (!player || !evaluateRoomTransition(room, player, 'star-confirmed').ok) return false;
 
   const nextPending = acknowledgePendingStarResolution(pending, playerId);
   if (nextPending !== pending) pendingStarResolutions.set(roomCode, nextPending);
@@ -1374,25 +1398,14 @@ io.on('connection', (socket) => {
       return;
     }
 
-    if (ctx.room.game && hasActiveInteractionLock(ctx.room)) {
-      const reason = ctx.room.game.interactionLock?.reason;
-      const error =
-        reason === 'dealing'
-          ? 'Wait until dealing finishes'
-          : reason === 'level-complete'
-            ? 'Wait until the level clear message finishes'
-          : reason === 'countdown'
-            ? 'The countdown is already running'
-            : reason === 'star'
-              ? 'Wait until the star discard finishes'
-            : 'Wait until the current transition finishes';
-      ack?.({ ok: false, error });
-      return;
-    }
-
     const parsed = parseReadyPayload(payload);
     if (!parsed.ok) {
       ack?.({ ok: false, error: 'Invalid ready state' });
+      return;
+    }
+    const transition = evaluateRoomTransition(ctx.room, ctx.player, parsed.value.ready ? 'ready' : 'unready');
+    if (!transition.ok) {
+      ack?.({ ok: false, error: transition.error });
       return;
     }
     const readyDecision = applyRoundReadyRequest(
@@ -1461,12 +1474,7 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const decision = validateLobbyStartRequest({
-      isHost: ctx.room.hostId === ctx.playerId,
-      roomStatus: ctx.room.status,
-      hasGame: Boolean(ctx.room.game),
-      connectedPlayerCount: countConnectedPlayers(ctx.room),
-    });
+    const decision = evaluateRoomTransition(ctx.room, ctx.player, 'start');
     if (!decision.ok) {
       ack?.({ ok: false, error: decision.error });
       return;
@@ -1483,13 +1491,9 @@ io.on('connection', (socket) => {
       return;
     }
 
-    if (ctx.room.hostId !== ctx.playerId) {
-      ack?.({ ok: false, error: 'Only the host can retry' });
-      return;
-    }
-
-    if (!ctx.room.game) {
-      ack?.({ ok: false, error: 'There is no active game' });
+    const retryDecision = evaluateRoomTransition(ctx.room, ctx.player, 'retry');
+    if (!retryDecision.ok) {
+      ack?.({ ok: false, error: retryDecision.error });
       return;
     }
 
@@ -1553,18 +1557,9 @@ io.on('connection', (socket) => {
       return;
     }
 
-    if (ctx.room.game.phase !== 'playing') {
-      ack?.({ ok: false, error: 'You can only pause during active play' });
-      return;
-    }
-
-    if (hasActiveInteractionLock(ctx.room)) {
-      ack?.({ ok: false, error: 'Wait until the current transition finishes' });
-      return;
-    }
-
-    if (!isActiveRoundParticipant(ctx.room, ctx.player)) {
-      ack?.({ ok: false, error: 'You already finished your cards this round' });
+    const transition = evaluateRoomTransition(ctx.room, ctx.player, 'pause');
+    if (!transition.ok) {
+      ack?.({ ok: false, error: transition.error });
       return;
     }
 
@@ -1583,23 +1578,9 @@ io.on('connection', (socket) => {
       return;
     }
 
-    if (ctx.room.game.phase !== 'playing') {
-      ack?.({ ok: false, error: 'You can only propose a star during active play' });
-      return;
-    }
-
-    if (hasActiveInteractionLock(ctx.room)) {
-      ack?.({ ok: false, error: 'Wait until the current transition finishes' });
-      return;
-    }
-
-    if (ctx.room.game.stars <= 0) {
-      ack?.({ ok: false, error: 'No stars left' });
-      return;
-    }
-
-    if (!isActiveRoundParticipant(ctx.room, ctx.player)) {
-      ack?.({ ok: false, error: 'You already finished your cards this round' });
+    const transition = evaluateRoomTransition(ctx.room, ctx.player, 'propose-star');
+    if (!transition.ok) {
+      ack?.({ ok: false, error: transition.error });
       return;
     }
 
@@ -1626,14 +1607,9 @@ io.on('connection', (socket) => {
       ack?.({ ok: false, error: 'There is no active star proposal' });
       return;
     }
-
-    if (ctx.room.game.phase !== 'playing') {
-      ack?.({ ok: false, error: 'You can only accept a star during active play' });
-      return;
-    }
-
-    if (hasActiveInteractionLock(ctx.room)) {
-      ack?.({ ok: false, error: 'Wait until the current transition finishes' });
+    const transition = evaluateRoomTransition(ctx.room, ctx.player, 'accept-star');
+    if (!transition.ok) {
+      ack?.({ ok: false, error: transition.error });
       return;
     }
 
@@ -1665,24 +1641,9 @@ io.on('connection', (socket) => {
       ack?.({ ok: false, error: 'There is no active star proposal' });
       return;
     }
-
-    if (ctx.room.game.phase !== 'playing') {
-      ack?.({ ok: false, error: 'You can only cancel a star during active play' });
-      return;
-    }
-
-    if (hasActiveInteractionLock(ctx.room)) {
-      ack?.({ ok: false, error: 'Wait until the current transition finishes' });
-      return;
-    }
-
-    if (!isActiveRoundParticipant(ctx.room, ctx.player)) {
-      ack?.({ ok: false, error: 'You already finished your cards this round' });
-      return;
-    }
-
-    if (ctx.room.game.starProposal.initiatorId !== ctx.playerId) {
-      ack?.({ ok: false, error: 'Only the proposing player can cancel the star' });
+    const transition = evaluateRoomTransition(ctx.room, ctx.player, 'cancel-star');
+    if (!transition.ok) {
+      ack?.({ ok: false, error: transition.error });
       return;
     }
 
@@ -1698,19 +1659,9 @@ io.on('connection', (socket) => {
       ack?.({ ok: false, error: 'There is no active star proposal' });
       return;
     }
-
-    if (ctx.room.game.phase !== 'playing') {
-      ack?.({ ok: false, error: 'You can only reject a star during active play' });
-      return;
-    }
-
-    if (hasActiveInteractionLock(ctx.room)) {
-      ack?.({ ok: false, error: 'Wait until the current transition finishes' });
-      return;
-    }
-
-    if (ctx.room.game.starProposal.initiatorId === ctx.playerId) {
-      ack?.({ ok: false, error: 'The proposing player must cancel the star directly' });
+    const transition = evaluateRoomTransition(ctx.room, ctx.player, 'reject-star');
+    if (!transition.ok) {
+      ack?.({ ok: false, error: transition.error });
       return;
     }
 

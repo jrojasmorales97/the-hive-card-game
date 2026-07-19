@@ -3,12 +3,12 @@
 ## Contexto funcional
 
 - Documento: `.harness/context/domain.md`
-- Leer cuando: necesites entender el producto, las reglas del juego, los requisitos implementados o pendientes, el glosario funcional o las incertidumbres detectadas a partir de `README.md` y `apps/backend/src/index.ts`.
+- Leer cuando: necesites entender el producto, las reglas del juego, la máquina de estados funcional, los requisitos implementados o pendientes, el glosario funcional o las incertidumbres detectadas a partir de `README.md` y `apps/backend/src/index.ts`.
 
 ## Contexto tecnico
 
 - Documento: `.harness/context/architecture.md`
-- Leer cuando: vayas a cambiar stack, comandos, estructura de carpetas, contratos Socket.IO, patrones backend/frontend, dependencias o workflow de despliegue observados en `docker-compose.yml`, `render.yaml`, `apps/backend/` y `apps/frontend/`.
+- Leer cuando: vayas a cambiar stack, comandos, estructura de carpetas, contratos Socket.IO, la máquina de estados autoritativa, patrones backend/frontend, dependencias o workflow de despliegue observados en `docker-compose.yml`, `render.yaml`, `apps/backend/` y `apps/frontend/`.
 - Contratos Socket.IO: `packages/contracts/`; consultar antes de modificar payloads, snapshots, acks o eventos realtime.
 
 ## Artefactos SDD

@@ -90,6 +90,52 @@ test('buildCommandActions keeps ready visible for active players and respects ov
   ]);
 });
 
+test('buildCommandActions maps start and waiting commands from private capabilities', () => {
+  const startActions = buildCommandActions({
+    startAction: { type: 'start', visible: true, enabled: true },
+    showCancelStar: false,
+    showAcceptStar: false,
+    showRejectStar: false,
+    showProposeStar: false,
+    showHivePlaceholder: false,
+    placeholderLabel: 'The hive is tuning the next pulse',
+    readyOverlayBlocked: false,
+    isInGame: false,
+    phase: null,
+  });
+  const waitingActions = buildCommandActions({
+    unreadyAction: { type: 'unready', visible: true, enabled: true },
+    showCancelStar: false,
+    showAcceptStar: false,
+    showRejectStar: false,
+    showProposeStar: false,
+    showHivePlaceholder: false,
+    placeholderLabel: 'The hive is tuning the next pulse',
+    readyOverlayBlocked: false,
+    isInGame: true,
+    phase: 'focus',
+  });
+  const preparingActions = buildCommandActions({
+    unreadyAction: { type: 'unready', visible: true, enabled: true },
+    showCancelStar: false,
+    showAcceptStar: false,
+    showRejectStar: false,
+    showProposeStar: false,
+    showHivePlaceholder: true,
+    placeholderLabel: 'The hive is dealing the next pulse',
+    readyOverlayBlocked: false,
+    isInGame: true,
+    phase: 'focus',
+  });
+
+  assert.equal(startActions[0]?.key, 'start');
+  assert.equal(startActions[0]?.disabled, false);
+  assert.equal(waitingActions[0]?.key, 'waiting');
+  assert.equal(waitingActions[0]?.disabled, false);
+  assert.equal(preparingActions[0]?.key, 'hive-sync');
+  assert.equal(preparingActions[0]?.disabled, true);
+});
+
 test('buildCommandActions keeps star consensus CTAs ahead of the round-out placeholder', () => {
   const actions = buildCommandActions({
     roundOutWaitAction: {
@@ -100,6 +146,11 @@ test('buildCommandActions keeps star consensus CTAs ahead of the round-out place
     },
     acceptStarAction: {
       type: 'accept_star',
+      visible: true,
+      enabled: true,
+    },
+    rejectStarAction: {
+      type: 'reject_star',
       visible: true,
       enabled: true,
     },
@@ -132,6 +183,38 @@ test('buildCommandActions keeps star consensus CTAs ahead of the round-out place
       disabled: false,
     },
   ]);
+});
+
+test('buildCommandActions derives cancel and reject disabled states from private capabilities', () => {
+  const cancelActions = buildCommandActions({
+    cancelStarAction: { type: 'cancel_star', visible: true, enabled: false },
+    showCancelStar: true,
+    showAcceptStar: false,
+    showRejectStar: false,
+    showProposeStar: false,
+    showHivePlaceholder: false,
+    placeholderLabel: 'The hive is tuning the next pulse',
+    readyOverlayBlocked: false,
+    isInGame: true,
+    phase: 'playing',
+  });
+  const rejectActions = buildCommandActions({
+    rejectStarAction: { type: 'reject_star', visible: true, enabled: false },
+    showCancelStar: false,
+    showAcceptStar: false,
+    showRejectStar: true,
+    showProposeStar: false,
+    showHivePlaceholder: false,
+    placeholderLabel: 'The hive is tuning the next pulse',
+    readyOverlayBlocked: false,
+    isInGame: true,
+    phase: 'playing',
+  });
+
+  assert.equal(cancelActions[0]?.key, 'cancel-star');
+  assert.equal(cancelActions[0]?.disabled, true);
+  assert.equal(rejectActions[0]?.key, 'reject-star');
+  assert.equal(rejectActions[0]?.disabled, true);
 });
 
 test('buildCommandActions preserves gameplay CTAs before fallback placeholders', () => {

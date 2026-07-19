@@ -21,6 +21,7 @@ function buildContext(overrides: Partial<Parameters<typeof buildPrivateActions>[
     stars: 1,
     hasStarProposal: false,
     alreadyAcceptedStar: false,
+    isStarProposalInitiator: false,
     isRoundReadyParticipant: true,
     isActiveRoundParticipant: true,
     canParticipateInStarConsensus: true,
@@ -156,4 +157,14 @@ test('buildPrivateActions only exposes retry to the host after the run ends', ()
   }));
 
   assert.deepEqual(actionState('retry', actions), { type: 'retry', visible: true, enabled: true });
+});
+
+test('buildPrivateActions projects canonical cancel and reject capabilities separately', () => {
+  const initiator = buildPrivateActions(buildContext({ hasStarProposal: true, isStarProposalInitiator: true }));
+  const respondent = buildPrivateActions(buildContext({ hasStarProposal: true, isStarProposalInitiator: false }));
+
+  assert.equal(actionState('cancel_star', initiator)?.enabled, true);
+  assert.equal(actionState('reject_star', initiator)?.visible, false);
+  assert.equal(actionState('cancel_star', respondent)?.visible, false);
+  assert.equal(actionState('reject_star', respondent)?.enabled, true);
 });
