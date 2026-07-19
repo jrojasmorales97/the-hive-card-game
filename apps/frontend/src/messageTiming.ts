@@ -30,6 +30,12 @@ export function overlaySubtitle(kind: OverlayMessageKind): string {
   return OVERLAY_SUBTITLES[kind];
 }
 
+export function readyOverlayBlockedReason(kind: OverlayMessageKind | null | undefined): string | null {
+  if (kind === 'pause') return 'Wait until the pause message finishes';
+  if (kind === 'level-complete') return 'Wait until the level clear message finishes';
+  return null;
+}
+
 export function deferOverlayMs(baseDelayMs: number, blockingUntil: number | null, now = Date.now()): number {
   const remainingBlockingMs = blockingUntil === null ? 0 : Math.max(0, blockingUntil - now);
   return Math.max(baseDelayMs, remainingBlockingMs);

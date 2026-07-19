@@ -54,6 +54,7 @@ import {
   VICTORY_SUBTITLE,
   overlayDurationMs,
   overlaySubtitle,
+  readyOverlayBlockedReason,
 } from './messageTiming.js';
 
 type Player = PublicRoomState['players'][number];
@@ -1505,7 +1506,8 @@ export function App() {
   const cancelStarAction = actionFor('cancel_star');
   const rejectStarAction = actionFor('reject_star');
   const roundOutWaitAction = actionFor('round_out_wait');
-  const readyOverlayBlocked = eventOverlay?.kind === 'level-complete';
+  const readyOverlayError = readyOverlayBlockedReason(eventOverlay?.kind);
+  const readyOverlayBlocked = readyOverlayError !== null;
   const prepLabel =
     activeInteractionLock?.reason === 'dealing'
       ? 'The hive is dealing the next pulse'
@@ -1775,7 +1777,7 @@ export function App() {
     setError('');
     const targetAction = ready ? readyAction : unreadyAction;
     if (!targetAction?.enabled || readyOverlayBlocked) {
-      setError(readyOverlayBlocked ? 'Wait until the level clear message finishes' : (targetAction?.reason ?? 'Could not update ready state'));
+      setError(readyOverlayError ?? targetAction?.reason ?? 'Could not update ready state');
       return;
     }
     if (!socket) return;
