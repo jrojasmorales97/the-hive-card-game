@@ -78,3 +78,13 @@ test('state machine validates each lock-bound temporal release against its origi
     ok: false, error: 'Stale timed transition', patch: {}, effects: [],
   });
 });
+
+test('state machine remains the authority for level and terminal transitions', () => {
+  assert.equal(evaluateGameTransition(state({ phase: 'level-complete' }), 'level-completed', 20).ok, true);
+  assert.deepEqual(evaluateGameTransition(state({ phase: 'playing' }), 'game-over', 20), {
+    ok: true, patch: { phase: 'game-over', lock: null }, effects: [],
+  });
+  assert.deepEqual(evaluateGameTransition(state({ phase: 'level-complete' }), 'victory', 20), {
+    ok: true, patch: { phase: 'victory', lock: null }, effects: [],
+  });
+});

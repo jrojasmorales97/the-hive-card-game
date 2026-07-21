@@ -111,11 +111,11 @@ Una fase queda bloqueada cuando:
 | 02 | Enlazar fuente canonica de contratos | Registrar requisitos de privacidad y compatibilidad | Definir paquete, validacion y ownership de contratos |
 | 03 | Enlazar modelo de fases | Canonizar fases, acciones e invariantes | Documentar implementacion de state machine |
 | 04 | Registrar capa de dominio disponible | Refinar glosario e invariantes extraidas | Activar limites y convenciones de dominio |
-| 05 | Registrar casos de uso disponibles | Enlazar requirements con casos de uso | Definir application layer y puertos |
-| 06 | Registrar adaptadores operativos | Sin cambios salvo decision funcional | Definir ownership de efectos e infraestructura |
-| 07 | Actualizar mapa de entrada backend | Registrar cambios solo si afectan comportamiento | Definir transporte delgado y composition root |
-| 08 | Actualizar mapa de entrada frontend | Sin cambios salvo decision funcional | Definir ownership de estado y gateway frontend |
-| 09 | Actualizar indice de features | Enlazar features con capacidades del producto | Definir limites y convenciones de features |
+| 05 | Registrar casos de uso disponibles | Enlazar requirements con casos de uso | Activar `application/`, puertos y direccion hacia `domain/` |
+| 06 | Registrar adaptadores operativos | Sin cambios salvo decision funcional | Activar `infrastructure/` y ownership de efectos |
+| 07 | Actualizar mapa de entrada backend | Registrar cambios solo si afectan comportamiento | Activar `transport/` y reducir `index.ts` a composition root |
+| 08 | Actualizar mapa de entrada frontend | Sin cambios salvo decision funcional | Activar `app/gateway` y `app/state` con tests recursivos |
+| 09 | Actualizar indice de features | Enlazar features con capacidades del producto | Activar `features/` y `shared/` con APIs publicas |
 | 10 | Dejar indice final estable | Cerrar requirements y dudas resueltas | Consolidar enforcement y retirar excepciones |
 
 ## Fase 00 - Preparar el contexto del proyecto
@@ -365,7 +365,7 @@ Las intenciones externas se coordinan mediante casos de uso sin conocimiento del
 ### Cambios de contexto
 
 - `domain.md`: enlazar requirements con capacidades y autorizaciones.
-- `architecture.md`: definir application layer, puertos, resultados y errores.
+- `architecture.md`: aplicar la estrategia backend objetivo para `application/`, puertos, resultados, errores y direccion de imports.
 - `AGENTS.md`: enlazar mapa de casos de uso.
 - Enforcement local: imports permitidos de application.
 
@@ -378,6 +378,8 @@ Alcance:
 - Crear casos de uso para sala, reconexion, inicio, ready, jugar, pausa, estrella, retry y desconexion.
 - Definir dependencias para repositorio, eventos, reloj, random y scheduler.
 - Devolver resultados tipados con cambios, errores y eventos.
+- Crear `application/` por familias cohesivas, con puertos bajo `application/ports/` solo para dependencias externas reales.
+- Normalizar la ubicacion fisica de la maquina canonica dentro de `domain/` al poder actualizar todos sus consumidores y checks en un unico slice.
 - Migrar por familias manteniendo contratos externos.
 - Anadir tests con fakes deterministas.
 
@@ -389,7 +391,9 @@ Actualizacion del contexto del proyecto:
 
 Restricciones:
 - Los casos de uso no reciben sockets.
+- `application/` no importa Fastify, Socket.IO ni implementaciones de `infrastructure/`.
 - No crear una interfaz por funcion sin limite real.
+- No crear carpetas genericas `services`, `helpers`, `managers` o `utils`.
 - No cambiar contratos publicos.
 - No copiar estas reglas a agentes SDD genericos.
 
@@ -397,6 +401,7 @@ Validacion:
 - Los handlers migrados delegan en casos de uso.
 - Los casos de uso se prueban sin red.
 - Autorizacion y errores coinciden con `domain.md`.
+- Los tests de subdirectorios se descubren realmente y los checks prueban `application -> domain` sin aristas inversas.
 ```
 
 ## Fase 06 - Infraestructura y efectos
@@ -408,7 +413,7 @@ Almacenamiento in-memory, timers, reloj y random quedan tras adaptadores control
 ### Cambios de contexto
 
 - `domain.md`: solo cambia si aparece una decision funcional.
-- `architecture.md`: ownership de efectos, lifecycle, cleanup, puertos y adaptadores.
+- `architecture.md`: aplicar `infrastructure/memory`, `runtime`, `scheduling`, `cpu` y `effects`, con ownership de lifecycle y cleanup.
 - `AGENTS.md`: enlazar adaptadores y comandos relevantes.
 - Enforcement local: domain/application no importan implementaciones concretas.
 
@@ -421,6 +426,7 @@ Alcance:
 - Encapsular stores de salas y jugadores.
 - Crear adaptadores para reloj, barajado y scheduler.
 - Centralizar creacion, cancelacion y reemplazo de timers.
+- Colocar implementaciones concretas bajo `infrastructure/` por capacidad operativa, no por framework o patron generico.
 - Definir ownership y cleanup de recursos.
 - Permitir tests deterministas con adaptadores fake.
 
@@ -440,6 +446,7 @@ Validacion:
 - Domain y application no dependen de infraestructura concreta.
 - Los tests controlan reloj, random y scheduler.
 - No quedan timers huerfanos en los flujos cubiertos.
+- Los checks automatizados permiten `infrastructure -> application` y rechazan imports de infraestructura desde application/domain.
 ```
 
 ## Fase 07 - Adaptadores Socket.IO
@@ -451,7 +458,7 @@ Fastify y Socket.IO quedan como adaptadores delgados; `index.ts` es composition 
 ### Cambios de contexto
 
 - `domain.md`: actualizar solo si cambia un comportamiento aprobado.
-- `architecture.md`: convenciones de handlers, serializacion, composition root e integracion.
+- `architecture.md`: aplicar `transport/http`, `transport/socket`, convenciones de handlers, serializacion, APIs publicas y composition root.
 - `AGENTS.md`: actualizar mapa de entrada backend.
 - Enforcement local: transport no contiene reglas ni accede a infraestructura fuera de puertos aprobados.
 
@@ -464,6 +471,7 @@ Alcance:
 - Separar handlers por familias funcionales.
 - Centralizar contexto de socket, acknowledgements, emisiones y snapshots.
 - Validar input y delegar inmediatamente.
+- Co-localizar integracion Socket.IO con el adaptador socket y mantener tooling fuera de runtime bajo `tooling/`.
 - Migrar por familias eliminando handlers legacy.
 - Anadir tests Socket.IO de exito, error, reconexion y privacidad.
 
@@ -483,6 +491,7 @@ Validacion:
 - `index.ts` contiene startup y composicion.
 - Los handlers son delgados.
 - Contratos, privacidad y reconexion estan cubiertos por integracion.
+- `transport/` consume la API publica de application y no importa operaciones internas de dominio ni adaptadores concretos.
 ```
 
 ## Fase 08 - Estado frontend
@@ -494,7 +503,7 @@ Existe un gateway Socket.IO unico y ownership claro para estado de servidor, con
 ### Cambios de contexto
 
 - `domain.md`: sin cambios salvo comportamiento nuevo aprobado.
-- `architecture.md`: ownership de estado, gateway, reducer y sincronizacion.
+- `architecture.md`: aplicar `app/gateway` y `app/state`, ownership de estado, reducer, sincronizacion y direccion de imports frontend.
 - `AGENTS.md`: actualizar entrada frontend.
 - Enforcement local: componentes no importan Socket.IO ni registran listeners.
 
@@ -507,6 +516,8 @@ Alcance:
 - Crear un unico gateway Socket.IO.
 - Traducir eventos a un reducer o modelo explicito.
 - Separar `serverState`, `connectionState`, `uiState` y `animationState`.
+- Cambiar primero los scripts para descubrir tests recursivamente antes de mover cualquier suite fuera de `src/`.
+- Mover correlacion de snapshots, resync e identidad persistida a `app/state/` y `app/gateway/` sin mover todavia presentacion por estilo.
 - Mantener backend como autoridad.
 - Preservar reconexion, snapshots versionados y overlays.
 - Migrar progresivamente sin redisenar UI.
@@ -521,12 +532,14 @@ Restricciones:
 - No introducir una libreria global sin necesidad demostrada.
 - No duplicar reglas backend.
 - No migrar todas las features de una vez.
+- Solo `app/gateway/` importa `socket.io-client` o conoce nombres de eventos wire.
 - No codificar convenciones React locales en SDD generico.
 
 Validacion:
 - Existe un unico punto de entrada Socket.IO.
 - No se mezclan snapshots de versiones distintas.
 - Los componentes reciben estado y comandos explicitos.
+- Todos los tests co-localizados en subdirectorios son descubiertos por `test` y `test:coverage`.
 ```
 
 ## Fase 09 - Features frontend
@@ -538,7 +551,7 @@ Validacion:
 ### Cambios de contexto
 
 - `domain.md`: mapear capacidades de producto a features sin incluir estructura interna.
-- `architecture.md`: limites app/features/shared, APIs publicas y legibilidad frontend.
+- `architecture.md`: aplicar limites `app/features/shared`, APIs publicas, co-localizacion, naming y legibilidad frontend.
 - `AGENTS.md`: indice de features y entrypoints.
 - Enforcement local: imports y ciclos entre features.
 
@@ -547,22 +560,19 @@ Validacion:
 ```text
 Quiero descomponer `apps/frontend/src/App.tsx` en features verticales sin cambiar el diseno ni el comportamiento.
 
-Features objetivo:
-- Acceso y reconexion.
-- Lobby.
-- Mesa de juego.
-- Ready y pausa.
-- Consenso de estrella.
-- Mano y pila.
-- Logs.
-- Final de nivel.
-- Resultados y retry.
+Features objetivo de primer nivel:
+- `room-access`: identidad, create/join y reconexion visible.
+- `lobby`: sala previa, host, start y salida.
+- `game`: mesa, mano, pila, ready, pausa, estrella, nivel y logs como internals cohesivos.
+- `results`: victoria/derrota, ranking y retry.
 
 Alcance:
 - Extraer una feature por slice.
 - Separar presentacion y coordinacion.
 - Mantener sockets y estado autoritativo fuera de componentes.
 - Crear `shared` solo con reutilizacion demostrada.
+- Exponer cada feature mediante un `index.ts` pequeno y prohibir imports externos a rutas internas.
+- Co-localizar componentes, modelo, tests y estilos con su propietario sin dividir inicialmente la cascada global.
 - Eliminar codigo antiguo de `App.tsx` tras cada migracion.
 
 Actualizacion del contexto del proyecto:
@@ -575,11 +585,14 @@ Restricciones:
 - No redisenar UI.
 - No crear carpetas genericas.
 - No importar internals de otra feature.
+- No elevar subflujos de `game/` a features hermanas sin lifecycle y API independientes.
+- No crear un barrel global de `src/` ni mover codigo a `shared/` antes de tener dos consumidores reales.
 - No trasladar estas convenciones a comandos SDD genericos.
 
 Validacion:
 - `App.tsx` compone features.
 - No hay ciclos ni imports internos cruzados.
+- `shared/` no importa `app/` o `features/`, y las features no importan gateway ni internals de otras features.
 - Desktop, mobile y flujos criticos mantienen comportamiento.
 ```
 
@@ -611,6 +624,7 @@ Objetivos:
 
 Alcance:
 - Revisar coherencia entre codigo, `AGENTS.md`, `domain.md` y `architecture.md`.
+- Confirmar que las carpetas reales, entrypoints, APIs publicas y direcciones de imports coinciden con la estrategia objetivo de ambas apps.
 - Cerrar el requirements log y dudas resueltas.
 - Activar lint, format, typecheck, tests, cobertura, build y reglas de dependencias.
 - Alinear CI y Docker.
@@ -633,6 +647,7 @@ Restricciones:
 Validacion:
 - CI y Docker ejecutan comandos equivalentes.
 - Imports prohibidos fallan mediante tooling local.
+- APIs publicas, ciclos y descubrimiento recursivo de tests fallan de forma explicita cuando se incumplen.
 - No queda legacy activo.
 - Tests, typecheck, cobertura y build pasan.
 - Un agente nuevo puede orientarse leyendo `AGENTS.md` y siguiendo referencias.
@@ -649,6 +664,7 @@ Validacion:
 - `AGENTS.md` sigue siendo un indice breve.
 - No se introdujo conocimiento de The Hive en comandos o plantillas SDD.
 - No queda legacy para los slices migrados.
+- Las carpetas y direcciones de imports activadas por la fase coinciden con `architecture.md` sin rutas paralelas ni tests omitidos.
 - Tests relevantes pasan en Docker.
 - Cobertura del codigo nuevo o modificado es >= 80%.
 - Typecheck y build pasan o existe un bloqueo concreto.
@@ -662,8 +678,8 @@ Validacion:
 | 01 Baseline | Completada | Caracterizacion Socket.IO, contexto baseline y tests Docker validados; evidencia: `.harness/implementations/2026-07-18/0.1-caracterizar-el-baseline-realtime-de-the-hive-con-tests-socket-io-y-contexto-actualizado-sin-cambiar-comportamiento-funcional-attempt-2.md` |
 | 02 Contratos | Completada | Contratos compartidos, validación runtime y privacidad verificadas; evidencia: `.harness/implementations/2026-07-18/0.2-centralizar-y-validar-los-contratos-socket-io-compartidos-de-the-hive-sin-cambiar-el-comportamiento-observable.md` |
 | 03 Estados | Completada | Maquina de estados, transiciones, locks, capacidades y Mermaid validados; evidencia: `.harness/implementations/2026-07-19/0.3-hacer-explicita-la-maquina-de-estados-de-the-hive-antes-de-extraer-el-dominio-attempt-2.md` |
-| 04 Dominio | Bloqueada por 03 | Reglas puras sin duplicacion |
-| 05 Aplicacion | Bloqueada por 04 | Casos de uso sin transporte |
+| 04 Dominio | Completada | Reglas puras sin duplicacion; evidencia: `.harness/implementations/2026-07-21/bdf87991-extraer-reglas-de-negocio-a-un-dominio-puro-task-05.md` |
+| 05 Aplicacion | Disponible | Casos de uso sin transporte |
 | 06 Infraestructura | Bloqueada por 05 | Efectos encapsulados |
 | 07 Socket.IO | Bloqueada por 06 | Transporte delgado |
 | 08 Estado frontend | Bloqueada por 07 | Gateway y ownership claros |

@@ -9,21 +9,114 @@
 # Capas
 
 - Orquestacion de repo: documentacion raiz y Compose en `README.md`, `docker-compose.yml`, `render.yaml`, `business.md` y `architecture.md`.
-- Backend autoritativo: `apps/backend/src/index.ts` concentra transporte HTTP/WebSocket, estado en memoria, reglas del juego, timers y serializacion publica/privada.
-- Backend helper: `apps/backend/src/*.ts` separa calculos puros o reglas puntuales como scoring (`finalScoring.ts`), locks (`gameTiming.ts`), participantes (`roundParticipants.ts`), lobby (`lobbyRules.ts`) y estrella (`starResolution.ts`).
+- Backend autoritativo: `apps/backend/src/index.ts` concentra transporte HTTP/WebSocket, estado en memoria, timers, serializacion publica/privada y las reglas aun no migradas.
+- Backend helper: `apps/backend/src/*.ts` conserva infraestructura y proyecciones como locks (`gameTiming.ts`), lobby (`lobbyRules.ts`) y coordinacion visual (`starAnimation.ts`); las reglas de juego viven en `src/domain/`.
 - Frontend shell: `apps/frontend/src/main.tsx` monta `App`, mientras `apps/frontend/src/App.tsx` concentra conexion Socket.IO, estado React, overlays y acciones del usuario.
 - Frontend helper: `apps/frontend/src/*.ts` extrae logica pura de sincronizacion, layout, copy y UI (`roomSync.ts`, `connectionStatus.ts`, `gameUi.ts`, `lobbyUi.ts`, `handLayout.ts`, `starUi.ts`, `finalScoreUi.ts`, `messageTiming.ts`).
 - Tests co-localizados: backend y frontend guardan tests unitarios junto a los modulos en `apps/backend/src/*.test.ts` y `apps/frontend/src/*.test.ts`.
+- Límite de dominio: `apps/backend/src/domain/` y `apps/backend/src/gameStateMachine.ts` contienen datos y decisiones puras. `setup.ts` recibe mazo/reloj/duraciones; `round.ts` ready/pausa/countdown; `cards.ts` jugada/penalización/descartes; `star.ts` consenso/preview/settlement; `progression.ts` recompensas, avance, locks de nivel y terminales; `scoring.ts` ranking con tiempo inyectado. `domainAdapter.ts` adapta el estado en memoria, `starAnimation.ts` coordina acks visuales y `index.ts` conserva Fastify, Socket.IO, timers, Maps, versionado y serialización.
 
 # Estrategia de carpetas
 
-- `apps/backend/`: servicio Node del juego; `src/index.ts` es el entrypoint y los demas archivos son helpers/test.
-- `apps/frontend/`: cliente Vite; `src/main.tsx` arranca la app, `src/App.tsx` concentra la UI principal y `src/styles.css` el estilo global.
+- Estado actual backend: `apps/backend/src/index.ts` es el entrypoint y shell monolitico; `src/domain/` contiene las reglas puras y el resto de helpers/tests sigue mayoritariamente plano bajo `src/`.
+- Estado actual frontend: `apps/frontend/src/main.tsx` arranca la app, `src/App.tsx` concentra conexion, estado, animacion y UI, los helpers/tests estan planos bajo `src/` y `src/styles.css` conserva la cascada global.
 - `packages/contracts/`: paquete ESM local `@the-hive/contracts`, fuente canónica de wire types, parsers runtime y mapas Socket.IO. Se divide por estado, acciones, logs y familias de eventos; no contiene estado interno ni reglas de juego.
 - `.harness/`: artefactos SDD y templates de regeneracion (`templates/`, `context/`, `plans/`, `implementations/`, `reviews/`).
 - `.opencode/`: configuracion local de agentes, comandos y skills; la skill de proyecto observada es `ux-ui-design`.
 - Raiz del repo: documentos de contexto (`README.md`, `business.md`, `architecture.md`) y orquestacion (`docker-compose.yml`, `render.yaml`).
 - No aplica: no se observo `package.json` en raiz; los manifests viven por aplicacion en `apps/backend/package.json` y `apps/frontend/package.json`.
+
+Las estructuras siguientes son el objetivo incremental de las fases pendientes del roadmap, no una afirmacion de que todas esas rutas existan hoy. Cada slice mueve un unico propietario, actualiza imports y borra la ruta anterior en el mismo estado estable.
+
+## Backend objetivo: capas alrededor del dominio
+
+El backend se organiza por direccion de dependencias porque combina reglas, casos de uso, efectos de proceso y dos transportes. No replica features visuales ni crea un archivo o interfaz por operacion.
+
+```text
+apps/backend/src/
+  index.ts                         # composition root y lifecycle
+  domain/                          # estado, reglas, eventos y maquina canonica
+    model.ts
+    result.ts
+    stateMachine.ts
+    participants.ts
+    setup.ts
+    round.ts
+    cards.ts
+    star.ts
+    progression.ts
+    scoring.ts
+  application/                     # casos de uso y puertos requeridos
+    roomUseCases.ts
+    gameUseCases.ts
+    starUseCases.ts
+    effectUseCases.ts
+    playerView.ts
+    domainAdapter.ts
+    ports/
+  infrastructure/                  # implementaciones concretas de puertos
+    memory/
+    runtime/
+    scheduling/
+    cpu/
+    effects/
+  transport/                       # validacion wire, acks, presenters y emisiones
+    http/
+    socket/
+  tooling/                         # checks y reporters ejecutados por scripts
+```
+
+- `domain/` solo importa `domain/`; `gameStateMachine.ts` se movera a `domain/stateMachine.ts` cuando un slice pueda actualizar todos sus consumidores y checks de una vez.
+- `application/` importa `domain/` y declaraciones bajo `application/ports/`; no importa Fastify, Socket.IO ni implementaciones de `infrastructure/`.
+- Los puertos se crean por dependencia externa real, no por funcion. Repositorio de salas, reloj, random/barajado, scheduler y publicacion de eventos son limites candidatos; no se exige una interfaz si una funcion inyectada expresa el limite completo.
+- `infrastructure/` implementa puertos y puede usar `Map`, reloj real, random y timers; no decide fases, elegibilidad, recursos, progreso ni outcomes.
+- `transport/` conoce `@the-hive/contracts`, Fastify o Socket.IO y la API publica de `application/`; no importa operaciones internas de `domain/` ni adaptadores concretos.
+- `index.ts` puede importar todas las capas solo para construir dependencias, registrar transportes y exponer `startServer`/`stopServer`; no contiene handlers, serializacion, reglas ni scheduling operativo.
+- Los casos de uso se agrupan por familia mientras sean cohesivos. Se divide un modulo solo por variacion o tamano real; se evitan carpetas `services/`, `helpers/`, `managers/` y `utils/` sin propietario claro.
+- Los tests unitarios se colocan junto al modulo; la integracion Socket.IO vive junto al adaptador socket y los checks de limites junto a `tooling/`. Los scripts deben descubrir tests recursivamente antes de moverlos.
+- Direccion permitida: `transport -> application -> domain`; `infrastructure -> application`; `index.ts -> transport + application + infrastructure`. Cualquier otra arista entre capas requiere documentacion explicita.
+
+## Frontend objetivo: app y features verticales
+
+El frontend se organiza por ownership de sesion y experiencia visible, no copiando las capas del backend. Socket.IO y la correlacion de snapshots son horizontales de aplicacion; la presentacion se divide en pocas features verticales.
+
+```text
+apps/frontend/src/
+  main.tsx
+  app/
+    App.tsx                        # composicion de pantallas
+    gateway/                       # unico cliente Socket.IO y comandos tipados
+    state/                         # sesion, reducer, resync y correlacion de snapshots
+    styles/                        # estilos globales mientras la cascada sea compartida
+  features/
+    room-access/                   # identidad, create/join y reconexion visible
+    lobby/                         # sala previa, host, start y salida
+    game/                          # mesa, mano, pila, ready, pausa, estrella y logs
+      components/
+      model/
+    results/                       # victoria/derrota, ranking y retry
+  shared/                          # solo reutilizacion demostrada entre features
+    ui/
+    assets/
+```
+
+- `app/gateway/` es el unico lugar que importa `socket.io-client` o conoce nombres de eventos wire. Expone comandos semanticos y eventos tipados; no importa React ni mantiene estado visual.
+- `app/state/` coordina gateway, identidad persistida, conexion, versiones, estado publico/privado y resync. Expone a `App.tsx` estado y comandos explicitos; no renderiza UI.
+- `features/` recibe datos y callbacks por props desde `App.tsx`; ninguna feature importa `app/state`, gateway ni internals de otra feature.
+- `game/` mantiene como internals los subflujos que comparten mesa y animaciones. Estrella, mano/pila, ready/pausa y logs solo se elevan a features hermanas si adquieren lifecycle y API realmente independientes.
+- `shared/` no importa `app/` ni `features/`. Un modulo entra en `shared/` solo despues de tener al menos dos consumidores reales; no se crean `utils/`, `components/` o `hooks/` globales como cajones de sastre.
+- Cada feature y cada limite de `app/` expone una API pequena mediante su `index.ts`; consumidores externos no importan rutas internas. No se crea un barrel global de todo `src/`.
+- Tests, modelos, componentes y estilos especificos se co-localizan con su propietario. Antes del primer movimiento se cambia `npm test` y `test:coverage` para descubrir `src/**/*.test.ts(x)` de forma recursiva y se prueba que ningun test queda omitido.
+- `styles.css` conserva inicialmente su ubicacion/cascada para no mezclar estructura y regresion visual. Se mueve a `app/styles/` o se reparte por feature solo despues de caracterizar orden, breakpoints y selectores compartidos; no se introduce un design system ni CSS Modules por defecto.
+- Direccion permitida: `main -> app`; `app -> features + shared`; `app/state -> app/gateway + shared`; `features -> shared`; `shared` no depende de capas superiores.
+
+## Reglas comunes de migracion
+
+- No se fuerza simetria entre aplicaciones: backend usa capas; frontend usa shell de aplicacion y features.
+- Los nombres describen propietario o capacidad, no el mecanismo generico usado para implementarla.
+- No hay reexports temporales prolongados ni dos rutas activas; cada slice mueve codigo, tests e imports y elimina el origen.
+- Los alias de paths solo se introducen si reducen imports cruzados tras existir limites estables; no sustituyen enforcement de dependencias.
+- Los checks locales verifican imports prohibidos, APIs publicas, ciclos y descubrimiento real de tests de acuerdo con la fase ya migrada.
 
 # Convenciones
 
@@ -35,10 +128,17 @@
 - Las fronteras Socket.IO importan `ClientToServerEvents`/`ServerToClientEvents` desde `@the-hive/contracts`; el backend valida payloads externos con parsers antes de aplicar reglas. Eventos reservados de Socket.IO no pertenecen a esos mapas.
 - Tests junto al codigo que validan helpers puros y reglas aisladas. Fuente: `apps/backend/src/*.test.ts`, `apps/frontend/src/*.test.ts`.
 - No aplica: no se observaron scripts de linting ni formateo declarados en los manifests inspeccionados. Fuente: `apps/backend/package.json`, `apps/frontend/package.json`.
+- `DomainResult` es discriminado: el rechazo solo contiene error y no se aplica; el éxito entrega estado completo, eventos y efectos declarativos. El adaptador fusiona exclusivamente estado funcional y conserva metadata de transporte.
+- El dominio no importa contracts wire, Fastify, Socket.IO, `@fastify/*`, `node:*`, shell, frontend ni infraestructura, ni usa imports dinámicos, `process`, `Date.now`, `Math.random` o timers. `npm run check:domain` lo verifica por AST en `src/domain/**` y `src/gameStateMachine.ts`.
+- `test`, `test:coverage` y `build` ejecutan antes `check:domain`; la cobertura usa el reporter de Node para exigir >=80% de líneas, branches y funciones sobre los archivos medibles del límite lógico, excluyendo tests y módulos declarativos.
+- Los efectos de setup/ronda declaran `trigger`, `dueAt` y expectativas de fase, razon y deadline. `materializeDomainEffects()` en `index.ts` es el scheduler de `dealing-expired` y `countdown-expired`; al vencer, devuelve el efecto al dominio, que lo rechaza si las expectativas ya no coinciden.
+- `domain/cards.ts` es el único propietario de mínimo propio, bloqueantes, penalización de vida, `errorCounts`, descartes de error y outcomes de carta. `materializeCardEffects()` solo programa `error-expired`, `round-flip-expired` y `round-unflip-expired`, reaplica el resultado atómico y traduce eventos sin recalcular la regla.
+- `domain/star.ts` es el único propietario de propuesta, votos, consenso, consumo, preview, settlement y outcome de estrella. `starAnimation.ts` recibe el preview y el efecto ya decididos para esperar sockets/acks, desconexión o deadline; no calcula participantes de negocio ni muta manos, estrellas, fase o locks.
+- `domain/progression.ts` es el único propietario de recompensa, topes, avance de nivel, bloqueo de readiness, derrota y victoria; `domain/scoring.ts` es el único propietario de puntuación, bandas, mensajes, penalizaciones y orden final. El scheduler de `index.ts` solo devuelve los efectos `next-level-expired` y `level-ready-expired` al dominio y traduce sus eventos ya decididos.
 
 # Reglas de legibilidad
 
-- Extraer reglas densas a helpers puros cuando no requieren acceso directo al socket o al estado global; esto ya ocurre con `finalScoring.ts`, `gameTiming.ts`, `roundParticipants.ts`, `roomSync.ts` y otros.
+- Extraer reglas densas al dominio cuando no requieren acceso directo al socket o al estado global; `gameTiming.ts` conserva solo utilidades de lock y `roomSync.ts` es una proyección de UI.
 - Mantener el contrato publico/privado del estado de sala: cambios a `serializeRoom()`, `buildPrivateState()` o `createRoomSnapshot()` deben preservar que la mano completa no salga por broadcast masivo.
 - Mantener envelopes versionados y marcas de tiempo para resync del cliente. Fuente: `createPublicRoomEnvelope`, `createPrivateStateEnvelope`, `createRoomSnapshot` en `apps/backend/src/index.ts`.
 - Mantener logs y feedback acotados: el backend conserva los ultimos 50 logs y el cliente replica ese recorte. Fuente: `emitGameLog()` en `apps/backend/src/index.ts`, manejo de logs en `apps/frontend/src/App.tsx`.
@@ -64,10 +164,10 @@
 
 # Maquina de estados autoritativa
 
-- `apps/backend/src/gameStateMachine.ts` es la fuente única pura para aceptar o rechazar triggers de partida. Importa únicamente el vocabulario wire (`RoomStatus`, `GamePhase`, locks) desde contratos y recibe un snapshot mínimo, actor y reloj inyectado.
-- La API `evaluateGameTransition()` devuelve una decisión discriminada, patch de fase/lock y effects temporales declarativos; no usa Socket.IO, Maps, timers reales ni estado visual. Los handlers de `index.ts` adaptan el estado en memoria, aplican mutaciones de cartas/vidas/recompensas y programan infraestructura.
+- `apps/backend/src/gameStateMachine.ts` es la fuente única pura para aceptar o rechazar triggers de partida. Importa vocabulario funcional desde `domain/model.ts` y recibe un snapshot mínimo, actor y reloj inyectado.
+- La API `evaluateGameTransition()` devuelve una decisión discriminada, patch de fase/lock y effects temporales declarativos; no usa Socket.IO, Maps, timers reales ni estado visual. `setup.ts` y `round.ts` la invocan antes de sus decisiones; los handlers de `index.ts` adaptan el estado en memoria, traducen resultados y programan infraestructura.
 - Los triggers incluyen entrada, ready/countdown, juego/pausa/error, consenso de estrella, cierre de ronda/nivel, terminales, retry y expiraciones. Un callback temporal debe conservar fase, motivo de lock y deadline esperados para ignorarse tras retry, reemplazo de lock o eliminación de sala.
-- `roundParticipants.ts` publica políticas nombradas: ready, play, pause, consensus y settlement. No debe introducirse un predicado genérico que cambie sus poblaciones.
+- `domain/participants.ts` publica políticas nombradas: ready, play, pause, consensus y settlement. No debe introducirse un predicado genérico que cambie sus poblaciones.
 - `buildPrivateActions()` proyecta capacidades privadas autorizadas, incluidas cancelación y rechazo de estrella. Frontend usa `enabled` para emitir comandos; fase, lock, `Date.now()` y overlays permanecen exclusivamente como presentación.
 
 # Paquetes instalados
@@ -101,8 +201,8 @@
 
 ## Testing
 
-- `npm test` en `apps/backend`: ejecuta `node --import tsx --test src/*.test.ts`. Fuente: `apps/backend/package.json`.
-- `npm run test:coverage` en `apps/backend`: ejecuta cobertura experimental del test runner de Node. Fuente: `apps/backend/package.json`.
+- `npm test` en `apps/backend`: ejecuta `check:domain` y los tests raíz y de `src/domain/`. Fuente: `apps/backend/package.json`.
+- `npm run test:coverage` en `apps/backend`: ejecuta `check:domain`, cobertura experimental del test runner de Node y el gate del límite lógico. Fuente: `apps/backend/package.json`.
 - `npm test` en `apps/frontend`: ejecuta `node --import tsx --test src/*.test.ts`. Fuente: `apps/frontend/package.json`.
 - `npm run test:coverage` en `apps/frontend`: ejecuta cobertura experimental del test runner de Node. Fuente: `apps/frontend/package.json`.
 

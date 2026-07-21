@@ -269,6 +269,30 @@ test('current baseline: star proposals vote, reject, cancel, and settle after an
   assert.equal(roundComplete.publicState.game?.phase, 'round-complete');
 });
 
+test('star settlement pauses for ready-up without emitting a pause-requested message', async (t) => {
+  const { url } = await startIntegrationServer();
+  const clients: TestClient[] = [];
+  t.after(async () => closeIntegration(clients));
+  const { host, guest } = await createRoom(url, clients);
+  await startPlaying(host, guest);
+  await completeCurrentLevel(host, guest);
+  await waitForSnapshot(host, (snapshot) => snapshot.publicState.game?.currentLevel === 2 && snapshot.publicState.game.interactionLock === null);
+  await readyRound(host, guest);
+
+  const pausedMessages: unknown[] = [];
+  host.on('game:paused', (payload) => pausedMessages.push(payload));
+  assert.equal((await emitWithAck<Ack>(host, 'star:propose')).ok, true);
+  const used = waitForEvent(host, 'game:star-used');
+  assert.equal((await emitWithAck<Ack>(guest, 'star:accept')).ok, true);
+  await used;
+  assert.equal((await emitWithAck<Ack>(host, 'star:discard-animation-complete')).ok, true);
+  assert.equal((await emitWithAck<Ack>(guest, 'star:discard-animation-complete')).ok, true);
+
+  const paused = await waitForSnapshot(host, (snapshot) => snapshot.publicState.game?.phase === 'paused');
+  assert.equal(paused.publicState.game?.phase, 'paused');
+  assert.deepEqual(pausedMessages, []);
+});
+
 test('current baseline: error overlays end in defeat and host retry resets the same room', async (t) => {
   const { url } = await startIntegrationServer();
   const clients: TestClient[] = [];

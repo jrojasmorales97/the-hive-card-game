@@ -2,42 +2,43 @@
 
 Esta carpeta guarda los artefactos del flujo SDD del proyecto.
 
-## Comandos
-
-- `/sdd:init`: regenera `AGENTS.md` y el contexto funcional y tecnico del proyecto
-- `/sdd:plan`: explora el codigo necesario y genera un plan listo para implementar
-- `/sdd:implement`: ejecuta un plan y genera su reporte de implementacion
-- `/sdd:review`: muestra y comenta secuencialmente todos los diffs antes de pedir una decision humana
-
 ## Flujo
 
-`plan -> implement -> review -> decision humana`
+`init -> spec -> gate -> design -> gate -> task -> implement`
 
-La review no crea trabajo nuevo automaticamente. Si quieres actuar sobre una review, crea un plan nuevo manualmente usando esa review como contexto.
+`/sdd:plan` orquesta SPEC, DESIGN y TASK; no crea un plan monolitico implementable.
 
-## Estructura
+## Comandos
 
-- `templates/`: plantillas literales del harness
-- `context/`: contexto funcional y tecnico regenerado por `/sdd:init`
-- `plans/`: planes versionados
-- `implementations/`: reportes de implementacion versionados
-- `reviews/`: reviews versionadas
+- `/sdd:spec` crea una SPEC `proposed`, pregunta como maximo diez veces y requiere `Aprobar|Solicitar cambios`.
+- `/sdd:design` consume SPEC `approved`, crea DESIGN `proposed` y requiere el mismo gate.
+- `/sdd:task` consume DESIGN `approved` y crea una o varias TASK `ready`.
+- `/sdd:implement` ejecuta una TASK y la actualiza a `implemented` al completar.
+
+## Estructura y estados
+
+- `specs/`: SPEC `proposed|approved`.
+- `designs/`: DESIGN `proposed|approved`, con `spec:`.
+- `tasks/`: TASK `ready|implemented`, con `spec:` y `design:`.
+- `implementations/`: reportes con `task:`.
+- `reviews/`: reviews historicas preservadas; no es una fase operativa.
+- `plans/`: artefactos monoliticos historicos preservados, no operativos.
+- `templates/`: contratos literales; `context/`: snapshots regenerados por `/sdd:init`.
+
+SPEC genera un short GUID hexadecimal de ocho caracteres, comprobado contra colisiones. DESIGN, TASK e implementation heredan ese `id`; las TASK se numeran `-task-01`, `-task-02`.
+
+Los artefactos no se sobrescriben: DESIGN reanuda una propuesta existente y TASK valida `task_count` antes de devolver las rutas ya creadas para un DESIGN. Los contratos de metadata, plantillas literales y primeras lineas de salida son obligatorios para la orquestacion.
 
 ## Convencion de salida
 
-Los comandos publican en el hilo principal una linea canonica con el artefacto creado:
-
+- `SPEC_PATH: <ruta>`
+- `DESIGN_PATH: <ruta>`
+- `TASK_PATH: <ruta>`
 - `ARTEFACT_PATH: <ruta>`
-
-Y cuando aplique tambien:
-
-- `ARTEFACT_TYPE: <tipo>`
-- `PLAN_PATH: <ruta>`
-- `IMPLEMENTATION_PATH: <ruta>`
 - `DECISION: <Aprobar|Solicitar cambios>`
 
 ## Contexto regenerado
 
-- `../AGENTS.md`: indice de referencias, artefactos y uso de skills
-- `context/domain.md`: proposito, contexto funcional, requerimientos, funcionalidades y glosario
-- `context/architecture.md`: stack, capas, estrategia de carpetas, convenciones, patrones, dependencias y comandos
+- `../AGENTS.md`: indice de referencias, artefactos y skills.
+- `context/domain.md`: proposito, contexto funcional y glosario.
+- `context/architecture.md`: stack, capas, convenciones y comandos.

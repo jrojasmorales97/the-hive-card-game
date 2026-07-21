@@ -6,7 +6,7 @@ created_at: {{created_at}}
 created_by_command: /sdd:implement
 source_prompt: {{source_prompt}}
 status: {{status}}
-plan: {{plan}}
+task: {{task}}
 baseline: {{baseline}}
 ---
 
@@ -26,9 +26,9 @@ Cambios preexistentes:
 
 {{cambios_preexistentes}}
 
-# Plan ejecutado
+# TASK ejecutada
 
-{{plan_ejecutado}}
+{{task_ejecutada}}
 
 # Cambios realizados
 

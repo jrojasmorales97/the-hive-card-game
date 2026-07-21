@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.json",
-    "test": "node --import tsx --test src/*.test.ts",
-    "test:coverage": "node --import tsx --test --experimental-test-coverage src/*.test.ts",
+    "check:domain": "tsx src/domainBoundaries.ts",
+    "build": "npm run check:domain && tsc -p tsconfig.json",
+    "test": "npm run check:domain && node --import tsx --test src/*.test.ts src/domain/*.test.ts",
+    "test:coverage": "npm run check:domain && node --import tsx --test --experimental-test-coverage --test-reporter=spec --test-reporter=./src/domainCoverageReporter.mjs --test-reporter-destination=stdout --test-reporter-destination=stdout src/*.test.ts src/domain/*.test.ts",
     "start": "node dist/index.js"
   },
   "dependencies": {

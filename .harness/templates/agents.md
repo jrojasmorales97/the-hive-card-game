@@ -12,9 +12,12 @@
 
 ## Artefactos SDD
 
-- Planes: `.harness/plans/`
+- Especificaciones: `.harness/specs/`
+- Disenos: `.harness/designs/`
+- Tareas: `.harness/tasks/`
 - Implementaciones: `.harness/implementations/`
-- Reviews: `.harness/reviews/`
+- Reviews historicas no operativas: `.harness/reviews/`
+- Planes historicos no operativos: `.harness/plans/`
 
 {{reglas_artefactos_sdd}}
 

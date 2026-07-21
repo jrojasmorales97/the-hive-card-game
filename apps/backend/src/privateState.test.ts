@@ -168,3 +168,17 @@ test('buildPrivateActions projects canonical cancel and reject capabilities sepa
   assert.equal(actionState('cancel_star', respondent)?.visible, false);
   assert.equal(actionState('reject_star', respondent)?.enabled, true);
 });
+
+test('buildPrivateActions takes enabled state and rejection reason from the state machine when a snapshot is present', () => {
+  const actions = buildPrivateActions(buildContext({
+    machineState: {
+      roomStatus: 'in-game', phase: 'paused', lock: null, lives: 2, stars: 1,
+      hasStarProposal: false, starInitiatorId: null, acceptedStarBy: [], isHost: false, actorId: 'alpha',
+      players: [{ id: 'alpha', connected: true, ready: false, hand: [12] }],
+    },
+    now: 100,
+  }));
+  assert.deepEqual(actionState('pause', actions), {
+    type: 'pause', visible: true, enabled: false, reason: 'You can only pause during active play',
+  });
+});

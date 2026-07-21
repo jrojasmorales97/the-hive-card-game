@@ -1,4 +1,15 @@
-import type { GamePhase, InteractionLock, InteractionLockReason, RoomStatus } from '@the-hive/contracts';
+import type {
+  DomainGamePhase as GamePhase,
+  DomainInteractionLock as InteractionLock,
+  DomainInteractionLockReason as InteractionLockReason,
+  DomainRoomStatus as RoomStatus,
+} from './domain/model.js';
+import {
+  consensusParticipants as domainConsensusParticipants,
+  playParticipants as domainPlayParticipants,
+  readyParticipants as domainReadyParticipants,
+  settlementParticipants as domainSettlementParticipants,
+} from './domain/participants.js';
 
 export type MachinePlayer = {
   id: string;
@@ -21,13 +32,15 @@ export type MachineState = {
   actorId: string;
   players: readonly MachinePlayer[];
   card?: number;
+  countdownMs?: number;
+  starResolutionMs?: number;
 };
 
 export type GameTrigger =
-  | 'start' | 'ready' | 'unready' | 'dealing-expired' | 'countdown-expired'
+  | 'start' | 'ready' | 'unready' | 'countdown-started' | 'dealing-expired' | 'countdown-expired'
   | 'play' | 'pause' | 'error-expired' | 'propose-star' | 'accept-star'
-  | 'cancel-star' | 'reject-star' | 'star-confirmed' | 'star-settled' | 'round-flip-expired'
-  | 'round-unflip-expired' | 'next-level-expired' | 'level-ready-expired' | 'retry';
+  | 'cancel-star' | 'reject-star' | 'star-confirmed' | 'star-consensus' | 'star-settled' | 'round-flip-expired'
+  | 'round-unflip-expired' | 'level-completed' | 'next-level-expired' | 'level-ready-expired' | 'game-over' | 'victory' | 'retry';
 
 export type TimerEffect = {
   type: 'schedule';
@@ -56,19 +69,19 @@ export function lockError(reason: InteractionLockReason | null): string {
 }
 
 export function readyParticipants(state: MachineState): MachinePlayer[] {
-  return state.players.filter((player) => player.connected && player.hand.length > 0);
+  return domainReadyParticipants(state);
 }
 
 export function playParticipants(state: MachineState): MachinePlayer[] {
-  return state.players.filter((player) => player.connected && player.hand.length > 0);
+  return domainPlayParticipants(state);
 }
 
 export function consensusParticipants(state: MachineState): MachinePlayer[] {
-  return state.players.filter((player) => player.connected);
+  return domainConsensusParticipants(state);
 }
 
 export function settlementParticipants(state: MachineState): MachinePlayer[] {
-  return state.players.filter((player) => player.hand.length > 0);
+  return domainSettlementParticipants(state);
 }
 
 function actor(state: MachineState): MachinePlayer | undefined {
@@ -84,8 +97,8 @@ function activeLock(state: MachineState, now: number): InteractionLock | null {
 }
 
 /**
- * Pure authoritative transition inventory. The shell owns all card/life/reward mutation,
- * Socket.IO and timers; this function only accepts/rejects and declares phase/lock changes.
+ * Pure authoritative transition inventory. The shell owns Socket.IO and timers; domain
+ * operations own card, resource, progression, and scoring mutations after this authorization.
  */
 export function evaluateGameTransition(state: MachineState, trigger: GameTrigger, now: number): TransitionDecision {
   const lock = activeLock(state, now);
@@ -108,6 +121,12 @@ export function evaluateGameTransition(state: MachineState, trigger: GameTrigger
     if (currentPhase !== 'focus' || state.lock?.reason !== 'dealing' || isLockActive(state.lock, now)) return reject('Stale timed transition');
     return { ok: true, patch: { lock: null }, effects: [] };
   }
+  if (trigger === 'countdown-started') {
+    if ((currentPhase !== 'focus' && currentPhase !== 'paused') || lock) return lock ? locked() : reject('Invalid game state');
+    if (!readyParticipants(state).length || !readyParticipants(state).every((player) => player.ready)) return reject('Invalid game state');
+    const until = now + Math.max(0, state.countdownMs ?? 3000);
+    return { ok: true, patch: { lock: { reason: 'countdown', until } }, effects: [lockEffect('countdown-expired', { reason: 'countdown', until }, currentPhase)] };
+  }
   if (trigger === 'countdown-expired') {
     if ((currentPhase !== 'focus' && currentPhase !== 'paused') || state.lock?.reason !== 'countdown' || isLockActive(state.lock, now)) return reject('Stale timed transition');
     return { ok: true, patch: { phase: 'playing', lock: null }, effects: [] };
@@ -117,7 +136,7 @@ export function evaluateGameTransition(state: MachineState, trigger: GameTrigger
     return { ok: true, patch: { lock: null }, effects: [] };
   }
   if (trigger === 'star-settled') {
-    if (currentPhase !== 'playing' || state.lock?.reason !== 'star' || isLockActive(state.lock, now)) return reject('Stale timed transition');
+    if (currentPhase !== 'playing' || state.lock?.reason !== 'star') return reject('Stale timed transition');
     return { ok: true, patch: { lock: null }, effects: [] };
   }
   if (trigger === 'round-flip-expired') {
@@ -128,6 +147,10 @@ export function evaluateGameTransition(state: MachineState, trigger: GameTrigger
     if (currentPhase !== 'round-complete') return reject('Stale timed transition');
     return { ok: true, patch: { phase: 'level-complete' }, effects: [] };
   }
+  if (trigger === 'level-completed') {
+    if (currentPhase !== 'level-complete' || lock) return lock ? locked() : reject('Stale timed transition');
+    return { ok: true, patch: {}, effects: [] };
+  }
   if (trigger === 'next-level-expired') {
     if (currentPhase !== 'level-complete') return reject('Stale timed transition');
     return { ok: true, patch: { phase: 'focus' }, effects: [] };
@@ -135,6 +158,14 @@ export function evaluateGameTransition(state: MachineState, trigger: GameTrigger
   if (trigger === 'level-ready-expired') {
     if (currentPhase !== 'focus' || state.lock?.reason !== 'level-complete' || isLockActive(state.lock, now)) return reject('Stale timed transition');
     return { ok: true, patch: { lock: null }, effects: [] };
+  }
+  if (trigger === 'game-over') {
+    if (currentPhase !== 'playing' || lock) return lock ? locked() : reject('Stale timed transition');
+    return { ok: true, patch: { phase: 'game-over', lock: null }, effects: [] };
+  }
+  if (trigger === 'victory') {
+    if (currentPhase !== 'level-complete' || lock) return lock ? locked() : reject('Stale timed transition');
+    return { ok: true, patch: { phase: 'victory', lock: null }, effects: [] };
   }
   if (!currentActor) return reject('Invalid game state');
   if (trigger === 'ready' || trigger === 'unready') {
@@ -173,6 +204,12 @@ export function evaluateGameTransition(state: MachineState, trigger: GameTrigger
     if (!consensusParticipants(state).some((player) => player.id === currentActor.id)) return reject('Invalid game state');
     if (state.acceptedStarBy.includes(currentActor.id)) return { ok: true, patch: {}, effects: [] };
     return { ok: true, patch: {}, effects: [] };
+  }
+  if (trigger === 'star-consensus') {
+    if (currentPhase !== 'playing' || lock) return lock ? locked() : reject('Invalid game state');
+    const until = now + Math.max(0, state.starResolutionMs ?? 5000);
+    const starLock = { reason: 'star' as const, until };
+    return { ok: true, patch: { lock: starLock }, effects: [lockEffect('star-settled', starLock, currentPhase)] };
   }
   if (trigger === 'star-confirmed') {
     if (currentPhase !== 'playing' || state.lock?.reason !== 'star') return reject('Stale timed transition');

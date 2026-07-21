@@ -22,41 +22,35 @@ import {
   parseReadyPayload,
 } from '@the-hive/contracts';
 import { pathToFileURL } from 'node:url';
-import { calculateFinalResults, type FinalPlayerResult } from './finalScoring.js';
 import { buildPrivateActions } from './privateState.js';
 import {
-  applyRoundReadyRequest,
-  createPauseEventPayload,
-  getActiveRoundParticipants,
-  getConnectedConsensusParticipants,
-  hasAllReadyForRound,
-  isActiveRoundParticipant,
-  isRoundReadyParticipant,
-  pauseRoundForReady as pauseRoundForReadyState,
-} from './roundParticipants.js';
+  playParticipants,
+  readyParticipants,
+} from './domain/participants.js';
+import { applyDomainResult, toDomainMatch } from './domainAdapter.js';
+import { expireCardEffect, playCard, type CardDurations } from './domain/cards.js';
+import { advanceLevel, completeLevel, expireProgressionEffect, finishGame } from './domain/progression.js';
+import type { DomainFinalPlayerResult as FinalPlayerResult, DomainRewardType as RewardType } from './domain/model.js';
+import { retryGame, startGame } from './domain/setup.js';
+import { expireRoundEffect, pauseRound, setRoundReady } from './domain/round.js';
+import { acceptStar, cancelStar, proposeStar, rejectStar, settleStar, type StarInput } from './domain/star.js';
+import type { DomainEffect, DomainEvent } from './domain/result.js';
 import {
-  acknowledgePendingStarResolution,
-  createPendingStarResolution,
-  isPendingStarResolutionComplete,
-  type PendingStarResolution,
-} from './starResolution.js';
-import { getRoundResolutionOutcome, shouldPauseAfterStarResolution, shouldResolveAfterErrorOverlay } from './roundResolution.js';
+  acknowledgeStarAnimation,
+  createPendingStarAnimation,
+  disconnectStarAnimation,
+  isStarAnimationComplete,
+  type PendingStarAnimation,
+} from './starAnimation.js';
 import {
   ERROR_LOCK_MS,
   LEVEL_COMPLETE_LOCK_MS,
-  STAR_RESOLUTION_LOCK_MS,
-  applyStarDiscardPreview,
-  createInteractionLock,
-  discardLowerCards,
   getDealLockDuration,
   isInteractionLockActive,
   type InteractionLock,
-  type StarDiscardPreview,
-  previewLowestCardPerPlayer,
 } from './gameTiming.js';
-import { nextLevelAdvanceDelayMs, nextLevelReadyLockMs } from './levelFlow.js';
 import { resolveRoomJoin, validateLobbyKickRequest } from './lobbyRules.js';
-import { evaluateGameTransition, type GameTrigger, type MachineState, type TransitionDecision } from './gameStateMachine.js';
+import type { MachineState } from './gameStateMachine.js';
 
 type Player = {
   id: string;
@@ -67,8 +61,6 @@ type Player = {
   hand: number[];
   isCpu?: boolean;
 };
-
-type RewardType = 'life' | 'star';
 
 type StarProposal = {
   initiatorId: string;
@@ -118,7 +110,7 @@ const socketPlayer = new Map<string, string>();
 const cpuPlayTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const levelCompleteTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const interactionLockTimers = new Map<string, ReturnType<typeof setTimeout>>();
-const pendingStarResolutions = new Map<string, PendingStarResolution>();
+const pendingStarResolutions = new Map<string, PendingStarAnimation>();
 const starResolutionTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const nextLevelTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let logSeq = 0;
@@ -127,15 +119,6 @@ let timingScale = 1;
 let listening = false;
 
 const MAX_PLAYERS = 8;
-const GAME_BALANCE: Record<number, { maxLevel: number; lives: number }> = {
-  2: { maxLevel: 12, lives: 2 },
-  3: { maxLevel: 10, lives: 3 },
-  4: { maxLevel: 8, lives: 4 },
-  5: { maxLevel: 8, lives: 4 },
-  6: { maxLevel: 7, lives: 5 },
-  7: { maxLevel: 6, lives: 5 },
-  8: { maxLevel: 5, lives: 5 },
-};
 
 const PORT = Number(process.env.PORT ?? 3001);
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN ?? 'http://localhost:5173';
@@ -250,8 +233,8 @@ function buildPrivateState(room: Room, player: Player): PrivatePlayerState {
       hasStarProposal: Boolean(room.game?.starProposal),
       alreadyAcceptedStar: Boolean(room.game?.starProposal?.acceptedBy.has(player.id)),
       isStarProposalInitiator: room.game?.starProposal?.initiatorId === player.id,
-      isRoundReadyParticipant: isRoundReadyParticipant(room, player),
-      isActiveRoundParticipant: isActiveRoundParticipant(room, player),
+      isRoundReadyParticipant: readyParticipants({ players: Object.values(room.players) }).includes(player),
+      isActiveRoundParticipant: playParticipants({ players: Object.values(room.players) }).includes(player),
       canParticipateInStarConsensus: player.connected,
       inRoundReadyWindow: Boolean(room.game && (room.game.phase === 'focus' || room.game.phase === 'paused')),
       canRetry: Boolean(room.game && (room.game.phase === 'victory' || room.game.phase === 'game-over') && room.hostId === player.id),
@@ -328,29 +311,6 @@ function getPlayerName(room: Room, playerId: string): string {
   return room.players[playerId]?.name ?? 'Jugador';
 }
 
-function maxLevelByPlayers(playerCount: number): number {
-  return GAME_BALANCE[playerCount]?.maxLevel ?? GAME_BALANCE[MAX_PLAYERS].maxLevel;
-}
-
-function initialLivesByPlayers(playerCount: number): number {
-  return GAME_BALANCE[playerCount]?.lives ?? GAME_BALANCE[MAX_PLAYERS].lives;
-}
-
-function buildRewardMap(maxLevel: number): Record<number, RewardType> {
-  const rewards: Record<number, RewardType> = {
-    2: 'star',
-    3: 'life',
-    5: 'star',
-    6: 'life',
-    8: 'star',
-    9: 'life',
-  };
-
-  return Object.fromEntries(
-    Object.entries(rewards).filter(([level]) => Number(level) <= maxLevel),
-  ) as Record<number, RewardType>;
-}
-
 function buildDeck(): number[] {
   const deck = Array.from({ length: 100 }, (_, index) => index + 1);
   for (let i = deck.length - 1; i > 0; i--) {
@@ -364,23 +324,8 @@ function isDevCpuRoom(room: Room): boolean {
   return Object.values(room.players).some((player) => player.isCpu);
 }
 
-function gameModeForRoom(room: Room): GameState['mode'] {
-  return isDevCpuRoom(room) ? 'dev-cpu' : 'normal';
-}
-
 function getHumanPlayers(room: Room): Player[] {
   return Object.values(room.players).filter((player) => !player.isCpu);
-}
-
-function markCpuPlayersReady(room: Room) {
-  if (!isDevCpuRoom(room)) return;
-
-  Object.values(room.players).forEach((player) => {
-    if (player.isCpu) {
-      player.connected = true;
-      player.ready = true;
-    }
-  });
 }
 
 function clearCpuTurn(roomCode: string) {
@@ -419,6 +364,31 @@ function clearInteractionLockTimer(roomCode: string) {
   interactionLockTimers.delete(roomCode);
 }
 
+/** The shell is the only scheduler: effects already contain the domain deadline and stale expectations. */
+function materializeDomainEffects(roomCode: string, effects: DomainEffect[]) {
+  for (const effect of effects) {
+    if (effect.trigger !== 'dealing-expired' && effect.trigger !== 'countdown-expired') continue;
+    clearInteractionLockTimer(roomCode);
+    const delay = Math.max(0, effect.dueAt - Date.now());
+    const timer = setTimeout(() => {
+      interactionLockTimers.delete(roomCode);
+      const room = rooms.get(roomCode);
+      const actor = room?.players[room.hostId];
+      if (!room || !actor) return;
+      const result = expireRoundEffect(
+        toDomainMatch(room), actor.id, effect, Math.max(Date.now(), effect.dueAt), scaledDuration(ROUND_COUNTDOWN_DELAY_MS),
+      );
+      if (!result.ok) return;
+      const applied = applyDomainResult(room, result);
+      if (!applied.applied) return;
+      materializeDomainEffects(roomCode, applied.effects);
+      emitRoomUpdate(roomCode);
+      if (room.game?.phase === 'playing') scheduleCpuTurn(roomCode, 0);
+    }, delay);
+    interactionLockTimers.set(roomCode, timer);
+  }
+}
+
 function clearStarResolutionTimer(roomCode: string) {
   const timer = starResolutionTimers.get(roomCode);
   if (!timer) return;
@@ -435,11 +405,6 @@ function clearPendingStarResolution(roomCode: string) {
 function hasActiveInteractionLock(room: Room): boolean {
   if (!room.game) return false;
   return isInteractionLockActive(room.game.interactionLock);
-}
-
-/** Adapter from in-memory state to the pure state-machine snapshot. */
-function evaluateRoomTransition(room: Room, player: Player, trigger: GameTrigger, now = Date.now(), card?: number) {
-  return evaluateGameTransition(createMachineState(room, player, card), trigger, now);
 }
 
 function createMachineState(room: Room, player: Player, card?: number): MachineState {
@@ -466,68 +431,53 @@ function createMachineState(room: Room, player: Player, card?: number): MachineS
   };
 }
 
-function applyTransition(room: Room, decision: TransitionDecision): boolean {
-  if (!decision.ok) return false;
-  if (decision.patch.roomStatus !== undefined) room.status = decision.patch.roomStatus;
-  if (!room.game) return true;
-  if (decision.patch.phase !== undefined) room.game.phase = decision.patch.phase;
-  if (decision.patch.lock !== undefined) room.game.interactionLock = decision.patch.lock;
-  return true;
-}
-
-function timedTriggerForLock(reason: InteractionLock['reason']): Extract<GameTrigger, 'dealing-expired' | 'countdown-expired' | 'error-expired' | 'star-settled' | 'level-ready-expired'> {
-  if (reason === 'dealing') return 'dealing-expired';
-  if (reason === 'countdown') return 'countdown-expired';
-  if (reason === 'error') return 'error-expired';
-  if (reason === 'star') return 'star-settled';
-  return 'level-ready-expired';
-}
-
-function setInteractionLock(
-  room: Room,
-  roomCode: string,
-  reason: InteractionLock['reason'],
-  durationMs: number,
-  onRelease?: (latestRoom: Room) => void,
-) {
+function startRoundCountdownIfReady(room: Room, roomCode: string): void {
   if (!room.game) return;
-
-  clearInteractionLockTimer(roomCode);
-  const scaledDurationMs = scaledDuration(durationMs);
-  const lock = createInteractionLock(reason, scaledDurationMs);
-  room.game.interactionLock = lock;
-
-  const timer = setTimeout(() => {
-    interactionLockTimers.delete(roomCode);
-
-    const latestRoom = rooms.get(roomCode);
-    if (!latestRoom?.game || latestRoom !== room) return;
-
-    const activeLock = latestRoom.game.interactionLock;
-    if (!activeLock || activeLock.reason !== lock.reason || activeLock.until !== lock.until) return;
-    const systemPlayer = latestRoom.players[latestRoom.hostId];
-    if (!systemPlayer) return;
-    const decision = evaluateRoomTransition(latestRoom, systemPlayer, timedTriggerForLock(lock.reason), Math.max(Date.now(), lock.until));
-    if (!applyTransition(latestRoom, decision)) return;
-    onRelease?.(latestRoom);
-    emitRoomUpdate(roomCode);
-  }, scaledDurationMs);
-
-  interactionLockTimers.set(roomCode, timer);
+  const participant = readyParticipants({ players: Object.values(room.players) })[0];
+  if (!participant) return;
+  const result = setRoundReady(toDomainMatch(room), participant.id, participant.ready, {
+    now: Date.now(),
+    countdownMs: scaledDuration(ROUND_COUNTDOWN_DELAY_MS),
+  });
+  if (!result.ok || !result.effects.length) return;
+  clearCpuTurn(roomCode);
+  applyDomainResult(room, result);
+  materializeDomainEffects(roomCode, result.effects);
 }
 
-function beginRoundCountdown(room: Room, roomCode: string) {
-  if (!room.game || hasActiveInteractionLock(room)) return;
-
-  clearCpuTurn(roomCode);
-  setInteractionLock(room, roomCode, 'countdown', ROUND_COUNTDOWN_DELAY_MS, (latestRoom) => {
-    if (!latestRoom.game) return;
-    Object.values(latestRoom.players).forEach((player) => {
-      player.ready = false;
-    });
-
-    scheduleCpuTurn(roomCode, 0);
-  });
+/** The shell schedules progression effects but delegates stale checks and every game mutation to the domain. */
+function materializeProgressionEffects(roomCode: string, effects: DomainEffect[]): void {
+  for (const effect of effects) {
+    if (effect.trigger !== 'next-level-expired' && effect.trigger !== 'level-ready-expired') continue;
+    clearNextLevelTimer(roomCode);
+    const timer = setTimeout(() => {
+      nextLevelTimers.delete(roomCode);
+      const room = rooms.get(roomCode);
+      const actor = room?.players[room.hostId];
+      if (!room || !actor || !room.game) return;
+      const now = Math.max(Date.now(), effect.dueAt);
+      if (effect.trigger === 'next-level-expired') {
+        const result = advanceLevel(toDomainMatch(room), actor.id, effect, {
+          now,
+          deck: buildDeck(),
+          levelCompleteMs: scaledDuration(LEVEL_COMPLETE_LOCK_MS),
+          dealingMs: scaledDuration(getDealLockDuration(room.game.currentLevel + 1)),
+        });
+        if (!result.ok) return;
+        const applied = applyDomainResult(room, result);
+        if (!applied.applied) return;
+        materializeProgressionEffects(roomCode, applied.effects);
+        emitRoomUpdate(roomCode);
+        translateProgressionEvents(room, roomCode, applied.events);
+        return;
+      }
+      const result = expireProgressionEffect(toDomainMatch(room), actor.id, effect, now);
+      if (!result.ok || !applyDomainResult(room, result).applied) return;
+      startRoundCountdownIfReady(room, roomCode);
+      emitRoomUpdate(roomCode);
+    }, Math.max(0, effect.dueAt - Date.now()));
+    nextLevelTimers.set(roomCode, timer);
+  }
 }
 
 function findGlobalLowestCard(room: Room): { player: Player; card: number } | null {
@@ -548,300 +498,123 @@ function canStartGame(room: Room): boolean {
   return room.status === 'lobby' && !room.game && countConnectedPlayers(room) >= 2;
 }
 
-function startGameInRoom(room: Room, roomCode: string) {
-  const playerCount = Object.values(room.players).length;
-  const maxLevel = maxLevelByPlayers(playerCount);
-  const startedAt = Date.now();
-  clearLevelCompleteTimer(roomCode);
-  clearInteractionLockTimer(roomCode);
-
-  room.status = 'in-game';
-  room.game = {
-    phase: 'focus',
-    currentLevel: 1,
-    maxLevel,
-    lives: initialLivesByPlayers(playerCount),
-    stars: 1,
-    pile: [],
-    pileHistory: [],
-    lastPlayed: null,
-    rewardMap: buildRewardMap(maxLevel),
-    mode: gameModeForRoom(room),
-    starProposal: null,
-    interactionLock: null,
-    startedAt,
-    errorCounts: {},
-    finalResults: null,
-  };
-
-  dealLevel(room, false);
-  setInteractionLock(room, roomCode, 'dealing', getDealLockDuration(room.game.currentLevel), (latestRoom) => {
-    if (!latestRoom.game) return;
-    if (hasAllReadyForRound(latestRoom)) beginRoundCountdown(latestRoom, roomCode);
-  });
-  emitRoomUpdate(roomCode);
-  io.to(roomCode).emit('game:started', {
-    version: room.version,
-    startedAt,
-    message: 'Game started. Get ready...',
-  });
-  emitGameLog(roomCode, 'game:started', { byPlayerId: room.hostId, byPlayerName: getPlayerName(room, room.hostId) });
-}
-
-function countRemainingCards(room: Room): number {
-  return Object.values(room.players).reduce((sum, player) => sum + player.hand.length, 0);
-}
-
-function pauseRoundForReady(room: Room, roomCode: string) {
-  const didPause = pauseRoundForReadyState(room);
-  if (!didPause) return false;
-
-  markCpuPlayersReady(room);
-  clearCpuTurn(roomCode);
-
-  return didPause;
-}
-
 function finishGameOver(room: Room, roomCode: string, reason: string) {
   if (!room.game) return;
-
-  finalizeGameResults(room);
-  room.game.phase = 'game-over';
+  const result = finishGame(toDomainMatch(room), room.hostId, 'game-over', Date.now());
+  if (!result.ok || !applyDomainResult(room, result).applied) return;
   clearCpuTurn(roomCode);
   emitRoomUpdate(roomCode);
   io.to(roomCode).emit('game:over', { version: room.version, reason });
   emitGameLog(roomCode, 'game:over', { reason });
 }
 
-function applyLevelReward(room: Room) {
-  if (!room.game) return;
-
-  const reward = room.game.rewardMap[room.game.currentLevel];
-  if (!reward) return;
-
-  if (reward === 'life') room.game.lives = Math.min(room.game.lives + 1, 5);
-  if (reward === 'star') room.game.stars = Math.min(room.game.stars + 1, 3);
-}
-
-function getLevelReward(room: Room): RewardType | null {
-  if (!room.game) return null;
-  return room.game.rewardMap[room.game.currentLevel] ?? null;
-}
-
-function finalizeGameResults(room: Room) {
-  if (!room.game) return;
-
-  room.game.finalResults = calculateFinalResults({
-    players: Object.values(room.players).map((player) => ({ id: player.id, name: player.name, isCpu: player.isCpu })),
-    plays: room.game.pileHistory,
-    gameStartedAt: room.game.startedAt,
-    completedAt: Date.now(),
-    errorCounts: room.game.errorCounts,
-  });
-}
-
-function dealLevel(room: Room, resetReady = true) {
-  if (!room.game) return;
-
-  const level = room.game.currentLevel;
-  const deck = buildDeck();
-
-  // Cada nivel arranca con pila limpia.
-  room.game.pile = [];
-  room.game.pileHistory = [];
-  room.game.lastPlayed = null;
-
-  Object.values(room.players).forEach((player) => {
-    player.hand = deck.splice(0, level).sort((a, b) => a - b);
-    if (resetReady || player.isCpu) player.ready = Boolean(player.isCpu);
-  });
-
-  room.game.phase = 'focus';
-  room.game.starProposal = null;
-  room.game.finalResults = null;
-}
-
-function completeLevelOrGame(room: Room, roomCode: string) {
-  if (!room.game) return;
-
-  const levelCompleted = room.game.currentLevel;
-  const reward = getLevelReward(room);
-  room.game.phase = 'level-complete';
-  applyLevelReward(room);
-
-  io.to(roomCode).emit('game:level-complete', {
-    version: nextFunctionalVersion(room),
-    levelCompleted,
-    reward,
-    lives: room.game.lives,
-    stars: room.game.stars,
-  });
-  emitGameLog(roomCode, 'game:level-complete', { levelCompleted });
-  if (reward) {
-    emitGameLog(roomCode, 'game:reward', {
-      reward,
-      lives: room.game.lives,
-      stars: room.game.stars,
-    });
-  }
-
-  if (room.game.currentLevel >= room.game.maxLevel) {
-    finalizeGameResults(room);
-    room.game.phase = 'victory';
-    emitGameLog(roomCode, 'game:victory', { levelCompleted, maxLevel: room.game.maxLevel });
-    return;
-  }
-
-  const nextLevelDelayMs = nextLevelAdvanceDelayMs(room.game.interactionLock);
-
-  clearNextLevelTimer(roomCode);
-  const nextLevelTimer = setTimeout(() => {
-    nextLevelTimers.delete(roomCode);
-    const latestRoom = rooms.get(roomCode);
-    if (!latestRoom || latestRoom !== room || !latestRoom.game) return;
-    const systemPlayer = latestRoom.players[latestRoom.hostId];
-    if (!systemPlayer || !applyTransition(latestRoom, evaluateRoomTransition(latestRoom, systemPlayer, 'next-level-expired'))) return;
-
-    latestRoom.game.currentLevel += 1;
-    dealLevel(latestRoom);
-    const nextLevelLockMs = nextLevelReadyLockMs(LEVEL_COMPLETE_LOCK_MS, getDealLockDuration(latestRoom.game.currentLevel));
-    setInteractionLock(latestRoom, roomCode, 'level-complete', nextLevelLockMs, () => {
-      if (!latestRoom.game) return;
-      if (hasAllReadyForRound(latestRoom)) beginRoundCountdown(latestRoom, roomCode);
-    });
-    emitRoomUpdate(roomCode);
-    io.to(roomCode).emit('game:next-level-ready', { version: latestRoom.version, level: latestRoom.game.currentLevel });
-    emitGameLog(roomCode, 'game:next-level-ready', { level: latestRoom.game.currentLevel });
-  }, nextLevelDelayMs);
-  nextLevelTimers.set(roomCode, nextLevelTimer);
-}
-
-function scheduleLevelCompletionAfterRoundOut(room: Room, roomCode: string) {
-  if (!room.game || levelCompleteTimers.has(roomCode)) return;
-
-  const flipTimer = setTimeout(() => {
-    levelCompleteTimers.delete(roomCode);
-
-    const latestRoom = rooms.get(roomCode);
-    if (!latestRoom?.game || latestRoom !== room || countRemainingCards(latestRoom) !== 0) return;
-    const systemPlayer = latestRoom.players[latestRoom.hostId];
-    if (!systemPlayer || !applyTransition(latestRoom, evaluateRoomTransition(latestRoom, systemPlayer, 'round-flip-expired'))) return;
-    emitRoomUpdate(roomCode);
-
-    const unflipTimer = setTimeout(() => {
-      levelCompleteTimers.delete(roomCode);
-
-      const finalRoom = rooms.get(roomCode);
-      if (!finalRoom?.game || finalRoom !== room || countRemainingCards(finalRoom) !== 0) return;
-      const finalSystemPlayer = finalRoom.players[finalRoom.hostId];
-      if (!finalSystemPlayer || !applyTransition(finalRoom, evaluateRoomTransition(finalRoom, finalSystemPlayer, 'round-unflip-expired'))) return;
-
-      completeLevelOrGame(finalRoom, roomCode);
-      emitRoomUpdate(roomCode);
-    }, scaledDuration(ROUND_OUT_UNFLIP_MS));
-
-    levelCompleteTimers.set(roomCode, unflipTimer);
-  }, scaledDuration(ROUND_OUT_FLIP_MS));
-
-  levelCompleteTimers.set(roomCode, flipTimer);
-}
-
-function resolveErrorAndDiscard(room: Room, playedCard: number) {
-  if (!room.game) return;
-
-  room.game.lives = Math.max(0, room.game.lives - 1);
-  discardLowerCards(room.players, playedCard);
-}
-
-function playCardInRoom(room: Room, roomCode: string, player: Player, card: number): { ok: true } | { ok: false; error: string } {
-  const transition = evaluateRoomTransition(room, player, 'play', Date.now(), card);
-  if (!transition.ok) return { ok: false, error: transition.error };
-  if (!room.game) return { ok: false, error: 'Invalid game state' };
-
-  player.hand = player.hand.filter((value) => value !== card);
-  const playedAt = Date.now();
-
-  const blockingCards = Object.values(room.players)
-    .flatMap((handOwner) =>
-      handOwner.hand
-        .filter((handCard) => handCard < card)
-        .map((value) => ({ value, playerId: handOwner.id, playerName: handOwner.name })),
-    )
-    .sort((a, b) => a.value - b.value);
-
-  const hasLowerCardInAnyHand = blockingCards.length > 0;
-  if (hasLowerCardInAnyHand) clearCpuTurn(roomCode);
-
-  room.game.pile.push(card);
-  room.game.pileHistory.push({ value: card, playerId: player.id, ts: playedAt, source: 'manual' });
-  room.game.lastPlayed = card;
-  room.game.starProposal = null;
-  emitGameLog(roomCode, 'game:card-played', {
-    playerId: player.id,
-    playerName: player.name,
-    card,
-  });
-
-  if (hasLowerCardInAnyHand) {
-    room.game.errorCounts[player.id] = (room.game.errorCounts[player.id] ?? 0) + 1;
-    resolveErrorAndDiscard(room, card);
-
-    setInteractionLock(room, roomCode, 'error', ERROR_LOCK_MS, (latestRoom) => {
-      if (!latestRoom.game || latestRoom.game.phase !== 'playing') return;
-
-      const latestOutcome = getRoundResolutionOutcome(latestRoom.game.lives, countRemainingCards(latestRoom));
-      if (shouldResolveAfterErrorOverlay(latestOutcome)) {
-        if (latestOutcome === 'game-over') {
-          finishGameOver(latestRoom, roomCode, 'No lives left');
-          return;
-        }
-
-        completeLevelOrGame(latestRoom, roomCode);
-        return;
-      }
-
-      pauseRoundForReady(latestRoom, roomCode);
-    });
-    io.to(roomCode).emit('game:error-penalty', {
-      version: nextFunctionalVersion(room),
-      playedCard: { value: card, playerId: player.id, playerName: player.name },
-      blockingCards,
-      lifeLost: 1,
-    });
-    emitGameLog(roomCode, 'game:error', {
-      playedCard: { value: card, playerId: player.id, playerName: player.name },
-      blockingCards,
-    });
-    blockingCards.forEach((discard) => {
-      emitGameLog(roomCode, 'game:discard', {
-        card: discard.value,
-        playerId: discard.playerId,
-        playerName: discard.playerName,
+function translateProgressionEvents(room: Room, roomCode: string, events: DomainEvent[]): void {
+  for (const event of events) {
+    if (event.type === 'level-completed') {
+      io.to(roomCode).emit('game:level-complete', {
+        version: nextFunctionalVersion(room), levelCompleted: event.level, reward: event.reward,
+        lives: room.game!.lives, stars: room.game!.stars,
       });
-    });
-
-    emitRoomUpdate(roomCode);
-    return { ok: true };
+      emitGameLog(roomCode, 'game:level-complete', { levelCompleted: event.level });
+    }
+    if (event.type === 'reward-applied') {
+      emitGameLog(roomCode, 'game:reward', { reward: event.reward, lives: room.game!.lives, stars: room.game!.stars });
+    }
+    if (event.type === 'next-level-ready') {
+      io.to(roomCode).emit('game:next-level-ready', { version: room.version, level: event.level });
+      emitGameLog(roomCode, 'game:next-level-ready', { level: event.level });
+    }
+    if (event.type === 'victory') emitGameLog(roomCode, 'game:victory', { levelCompleted: room.game!.currentLevel, maxLevel: room.game!.maxLevel });
   }
+}
 
-  const resolutionOutcome = getRoundResolutionOutcome(room.game.lives, countRemainingCards(room));
+function completeLevelWithDomain(room: Room, roomCode: string, now = Date.now()): void {
+  if (!room.game) return;
+  const result = completeLevel(toDomainMatch(room), room.hostId, { now, completedAt: now });
+  if (!result.ok || !applyDomainResult(room, result).applied) return;
+  translateProgressionEvents(room, roomCode, result.events);
+  materializeProgressionEffects(roomCode, result.effects);
+}
 
-  if (resolutionOutcome === 'game-over') {
-    finishGameOver(room, roomCode, 'No lives left');
-    return { ok: true };
+function cardDurations(): CardDurations {
+  return {
+    errorOverlayMs: scaledDuration(ERROR_LOCK_MS),
+    roundFlipMs: scaledDuration(ROUND_OUT_FLIP_MS),
+    roundUnflipMs: scaledDuration(ROUND_OUT_UNFLIP_MS),
+  };
+}
+
+function translateCardEvents(room: Room, roomCode: string, events: DomainEvent[]): { terminal: boolean; continueRound: boolean } {
+  let terminal = false;
+  let continueRound = false;
+  for (const event of events) {
+    if (event.type === 'card-played') {
+      emitGameLog(roomCode, 'game:card-played', { playerId: event.playerId, playerName: getPlayerName(room, event.playerId), card: event.card });
+    }
+    if (event.type === 'error-penalty') {
+      const playedCard = { value: event.card, playerId: event.playerId, playerName: getPlayerName(room, event.playerId) };
+      const blockingCards = event.blockingCards.map((discard) => ({ ...discard, playerName: getPlayerName(room, discard.playerId) }));
+      io.to(roomCode).emit('game:error-penalty', { version: nextFunctionalVersion(room), playedCard, blockingCards, lifeLost: event.lifeLost });
+      emitGameLog(roomCode, 'game:error', { playedCard, blockingCards });
+    }
+    if (event.type === 'card-discarded') {
+      emitGameLog(roomCode, 'game:discard', { card: event.card, playerId: event.playerId, playerName: getPlayerName(room, event.playerId) });
+    }
+    if (event.type === 'round-paused') {
+      const by = event.playerId;
+      const pausePayload = { version: room.version, by, message: 'Pause requested. The hive waits only for players still carrying cards.' };
+      io.to(roomCode).emit('game:paused', pausePayload);
+      emitGameLog(roomCode, 'game:paused', { byPlayerId: by, byPlayerName: getPlayerName(room, by) });
+    }
+    if (event.type === 'card-outcome') {
+      if (event.outcome === 'pause') continueRound = true;
+      if (event.outcome === 'game-over') {
+        finishGameOver(room, roomCode, 'No lives left');
+        terminal = true;
+      }
+      if (event.outcome === 'level-complete') completeLevelWithDomain(room, roomCode);
+    }
   }
+  return { terminal, continueRound };
+}
 
-  if (resolutionOutcome === 'level-complete') {
-    clearCpuTurn(roomCode);
-    scheduleLevelCompletionAfterRoundOut(room, roomCode);
-    emitRoomUpdate(roomCode);
-    return { ok: true };
+/** Materializes accepted card effects without deriving blockers, penalties, or outcomes in the shell. */
+function materializeCardEffects(roomCode: string, effects: DomainEffect[]) {
+  for (const effect of effects) {
+    if (effect.trigger !== 'error-expired' && effect.trigger !== 'round-flip-expired' && effect.trigger !== 'round-unflip-expired') continue;
+    const timers = effect.trigger === 'error-expired' ? interactionLockTimers : levelCompleteTimers;
+    const clear = effect.trigger === 'error-expired' ? clearInteractionLockTimer : clearLevelCompleteTimer;
+    clear(roomCode);
+    const delay = Math.max(0, effect.dueAt - Date.now());
+    const timer = setTimeout(() => {
+      timers.delete(roomCode);
+      const room = rooms.get(roomCode);
+      const actor = room?.players[room.hostId];
+      if (!room || !actor) return;
+      const result = expireCardEffect(toDomainMatch(room), actor.id, effect, Math.max(Date.now(), effect.dueAt), cardDurations());
+      if (!result.ok) return;
+      const applied = applyDomainResult(room, result);
+      if (!applied.applied) return;
+      const translated = translateCardEvents(room, roomCode, applied.events);
+      materializeCardEffects(roomCode, applied.effects);
+      if (!translated.terminal) emitRoomUpdate(roomCode);
+    }, delay);
+    timers.set(roomCode, timer);
   }
+}
 
+function playCardWithDomain(room: Room, roomCode: string, player: Player, card: number): { ok: true } | { ok: false; error: string } {
+  const result = playCard(toDomainMatch(room), player.id, card, Date.now(), cardDurations());
+  if (!result.ok) return { ok: false, error: result.error };
+  const applied = applyDomainResult(room, result);
+  if (!applied.applied) return { ok: false, error: 'Invalid game state' };
+  const hasError = applied.events.some((event) => event.type === 'error-penalty');
+  const closesRound = applied.effects.some((effect) => effect.trigger === 'round-flip-expired');
+  translateCardEvents(room, roomCode, applied.events);
+  if (hasError || closesRound) clearCpuTurn(roomCode);
+  materializeCardEffects(roomCode, applied.effects);
   emitRoomUpdate(roomCode);
-  if (hasLowerCardInAnyHand) return { ok: true };
-
-  scheduleCpuTurn(roomCode, 0);
+  if (!hasError && !closesRound) scheduleCpuTurn(roomCode, 0);
   return { ok: true };
 }
 
@@ -871,129 +644,91 @@ function scheduleCpuTurn(roomCode: string, extraDelayMs = 0) {
     const latestLowest = findGlobalLowestCard(latestRoom);
     if (!latestLowest?.player.isCpu) return;
 
-    playCardInRoom(latestRoom, roomCode, latestLowest.player, latestLowest.card);
+    playCardWithDomain(latestRoom, roomCode, latestLowest.player, latestLowest.card);
   }, scaledDuration(Math.max(0, extraDelayMs) + DEV_CPU_PLAY_DELAY_MS));
 
   cpuPlayTimers.set(roomCode, timer);
 }
 
-function acceptCpuStarVotes(room: Room, roomCode: string) {
-  if (!room.game?.starProposal) return;
-
-  const starProposal = room.game.starProposal;
-  Object.values(room.players).forEach((player) => {
-    if (!player.isCpu || !player.connected || starProposal.acceptedBy.has(player.id)) return;
-
-    starProposal.acceptedBy.add(player.id);
-    emitGameLog(roomCode, 'game:star-accepted', {
-      byPlayerId: player.id,
-      byPlayerName: player.name,
-    });
-  });
+function starInput(now = Date.now()): StarInput {
+  return { now, resolutionMs: scaledDuration(5000), roundFlipMs: scaledDuration(ROUND_OUT_FLIP_MS) };
 }
 
-function resolveStarIfEveryoneAccepted(room: Room, roomCode: string): boolean {
-  if (!room.game?.starProposal) return false;
-
-  const connectedPlayers = getConnectedConsensusParticipants(room).map((player) => player.id);
-
-  const everyoneAccepted = connectedPlayers.every((id) => room.game?.starProposal?.acceptedBy.has(id));
-  if (!everyoneAccepted) return false;
-
-  const initiatorId = room.game.starProposal.initiatorId;
-  clearCpuTurn(roomCode);
-  const discarded = resolveStar(room, roomCode);
-  const pendingResolution = createPendingStarResolution(discarded, room.players);
-  pendingStarResolutions.set(roomCode, pendingResolution);
-  clearStarResolutionTimer(roomCode);
-  starResolutionTimers.set(
-    roomCode,
-    setTimeout(() => {
-      starResolutionTimers.delete(roomCode);
-
-      const latestRoom = rooms.get(roomCode);
-      if (!latestRoom?.game) {
-        pendingStarResolutions.delete(roomCode);
-        return;
-      }
-
-      settlePendingStarResolution(latestRoom, roomCode);
-    }, scaledDuration(STAR_RESOLUTION_LOCK_MS)),
-  );
-  setInteractionLock(room, roomCode, 'star', STAR_RESOLUTION_LOCK_MS, (latestRoom) => {
-    if (!latestRoom.game || latestRoom.game.phase !== 'playing') return;
-
-    if (pendingStarResolutions.has(roomCode)) settlePendingStarResolution(latestRoom, roomCode);
-    if (!latestRoom.game || latestRoom.game.phase !== 'playing') return;
-
-    if (shouldPauseAfterStarResolution(getRoundResolutionOutcome(latestRoom.game.lives, countRemainingCards(latestRoom)))) {
-      pauseRoundForReady(latestRoom, roomCode);
+function translateStarEvents(room: Room, roomCode: string, events: DomainEvent[]): void {
+  events.forEach((event) => {
+    if (event.type === 'star-proposed') emitGameLog(roomCode, 'game:star-proposed', { byPlayerId: event.playerId, byPlayerName: getPlayerName(room, event.playerId) });
+    if (event.type === 'star-accepted') emitGameLog(roomCode, 'game:star-accepted', { byPlayerId: event.playerId, byPlayerName: getPlayerName(room, event.playerId) });
+    if (event.type === 'star-used') {
+      io.to(roomCode).emit('game:star-used', { version: nextFunctionalVersion(room), message: 'Star used. Lowest cards discarded.', discarded: event.discarded });
+      emitGameLog(roomCode, 'game:star-used', { byPlayerId: event.playerId, discarded: event.discarded });
     }
-  });
-  io.to(roomCode).emit('game:star-used', {
-    version: nextFunctionalVersion(room),
-    message: 'Star used. Lowest cards discarded.',
-    discarded,
-  });
-  emitGameLog(roomCode, 'game:star-used', {
-    byPlayerId: initiatorId,
-    discarded,
-  });
-  if (isPendingStarResolutionComplete(pendingResolution)) settlePendingStarResolution(room, roomCode);
-  return true;
-}
-
-function resolveStar(room: Room, roomCode: string): StarDiscardPreview[] {
-  if (!room.game || room.game.stars <= 0) return [];
-
-  const discarded = previewLowestCardPerPlayer(room.players);
-
-  room.game.stars -= 1;
-  room.game.starProposal = null;
-
-  return discarded;
-}
-
-function finalizeStarResolution(room: Room, roomCode: string, discarded: StarDiscardPreview[]) {
-  applyStarDiscardPreview(room.players, discarded);
-
-  discarded.forEach((entry) => {
-    emitGameLog(roomCode, 'game:discard', {
-      card: entry.card,
-      playerId: entry.playerId,
-      playerName: entry.playerName,
-      reason: 'star',
-    });
+    if (event.type === 'card-discarded' && event.reason === 'star') {
+      emitGameLog(roomCode, 'game:discard', { card: event.card, playerId: event.playerId, playerName: getPlayerName(room, event.playerId), reason: 'star' });
+    }
+    if (event.type === 'round-paused') {
+      const by = event.playerId;
+      const pausePayload = { version: room.version, by, message: 'Pause requested. The hive waits only for players still carrying cards.' };
+      io.to(roomCode).emit('game:paused', pausePayload);
+      emitGameLog(roomCode, 'game:paused', { byPlayerId: by, byPlayerName: getPlayerName(room, by) });
+    }
+    if (event.type === 'star-outcome' && event.outcome === 'game-over') finishGameOver(room, roomCode, 'No lives left');
   });
 }
 
-function settlePendingStarResolution(room: Room, roomCode: string) {
+function settlePendingStarResolution(room: Room, roomCode: string, now = Date.now()): boolean {
   const pending = pendingStarResolutions.get(roomCode);
-  if (!pending || !room.game) return false;
-
+  if (!pending) return false;
   clearPendingStarResolution(roomCode);
-  finalizeStarResolution(room, roomCode, pending.discarded);
+  const result = settleStar(toDomainMatch(room), room.hostId, pending.effect, { now, roundFlipMs: scaledDuration(ROUND_OUT_FLIP_MS) });
+  if (!result.ok) return false;
+  const applied = applyDomainResult(room, result);
+  if (!applied.applied) return false;
+  translateStarEvents(room, roomCode, applied.events);
+  materializeCardEffects(roomCode, applied.effects);
   emitRoomUpdate(roomCode);
-
-  if (countRemainingCards(room) === 0) {
-    scheduleLevelCompletionAfterRoundOut(room, roomCode);
-  }
-
   return true;
 }
 
-function acknowledgeStarDiscardAnimation(roomCode: string, playerId: string) {
+function materializeStarEffect(roomCode: string, effect: DomainEffect): void {
+  if (effect.trigger !== 'star-settled') return;
+  clearStarResolutionTimer(roomCode);
+  const timer = setTimeout(() => {
+    starResolutionTimers.delete(roomCode);
+    const room = rooms.get(roomCode);
+    if (room) settlePendingStarResolution(room, roomCode, Math.max(Date.now(), effect.dueAt));
+  }, Math.max(0, effect.dueAt - Date.now()));
+  starResolutionTimers.set(roomCode, timer);
+}
+
+function beginStarAnimation(room: Room, roomCode: string, event: Extract<DomainEvent, { type: 'star-used' }>, effects: DomainEffect[]): void {
+  const effect = effects.find((candidate) => candidate.trigger === 'star-settled');
+  if (!effect) return;
+  clearCpuTurn(roomCode);
+  const pending = createPendingStarAnimation(event.discarded, room.players, effect);
+  pendingStarResolutions.set(roomCode, pending);
+  materializeStarEffect(roomCode, effect);
+  translateStarEvents(room, roomCode, [event]);
+  if (isStarAnimationComplete(pending)) settlePendingStarResolution(room, roomCode);
+}
+
+function applyStarResult(room: Room, roomCode: string, result: ReturnType<typeof proposeStar>): boolean {
+  if (!result.ok) return false;
+  const applied = applyDomainResult(room, result);
+  if (!applied.applied) return false;
+  const used = applied.events.find((event): event is Extract<DomainEvent, { type: 'star-used' }> => event.type === 'star-used');
+  if (used) beginStarAnimation(room, roomCode, used, applied.effects);
+  translateStarEvents(room, roomCode, applied.events.filter((event) => event.type !== 'star-used'));
+  if (!used) emitRoomUpdate(roomCode);
+  return true;
+}
+
+function acknowledgeStarDiscardAnimation(roomCode: string, playerId: string, disconnected = false): boolean {
   const room = rooms.get(roomCode);
   const pending = pendingStarResolutions.get(roomCode);
   if (!room || !pending) return false;
-  const player = room.players[playerId];
-  if (!player || !evaluateRoomTransition(room, player, 'star-confirmed').ok) return false;
-
-  const nextPending = acknowledgePendingStarResolution(pending, playerId);
-  if (nextPending !== pending) pendingStarResolutions.set(roomCode, nextPending);
-  if (!isPendingStarResolutionComplete(nextPending)) return true;
-
-  settlePendingStarResolution(room, roomCode);
+  const next = disconnected ? disconnectStarAnimation(pending, playerId) : acknowledgeStarAnimation(pending, playerId);
+  if (next !== pending) pendingStarResolutions.set(roomCode, next);
+  if (isStarAnimationComplete(next)) settlePendingStarResolution(room, roomCode);
   return true;
 }
 
@@ -1089,7 +824,7 @@ function markSocketDisconnected(socketId: string) {
   player.connected = false;
   player.ready = false;
 
-  acknowledgeStarDiscardAnimation(roomCode, playerId);
+  acknowledgeStarDiscardAnimation(roomCode, playerId, true);
 
   if (room.hostId === playerId) pickNextHost(room, roomCode);
   emitRoomUpdate(roomCode);
@@ -1403,25 +1138,18 @@ io.on('connection', (socket) => {
       ack?.({ ok: false, error: 'Invalid ready state' });
       return;
     }
-    const transition = evaluateRoomTransition(ctx.room, ctx.player, parsed.value.ready ? 'ready' : 'unready');
-    if (!transition.ok) {
-      ack?.({ ok: false, error: transition.error });
+    const result = setRoundReady(toDomainMatch(ctx.room), ctx.playerId, parsed.value.ready, {
+      now: Date.now(),
+      countdownMs: scaledDuration(ROUND_COUNTDOWN_DELAY_MS),
+    });
+    if (!result.ok) {
+      ack?.({ ok: false, error: result.error });
       return;
     }
-    const readyDecision = applyRoundReadyRequest(
-      ctx.room,
-      ctx.player,
-      parsed.value.ready,
-      () => markCpuPlayersReady(ctx.room),
-    );
-    if (!readyDecision.ok) {
-      ack?.(readyDecision);
-      return;
-    }
-
-    if (readyDecision.shouldBeginCountdown) {
-      beginRoundCountdown(ctx.room, ctx.roomCode);
-    }
+    const applied = applyDomainResult(ctx.room, result);
+    if (!applied.applied) return;
+    if (applied.effects.length) clearCpuTurn(ctx.roomCode);
+    materializeDomainEffects(ctx.roomCode, applied.effects);
 
     emitRoomUpdate(ctx.roomCode);
     ack?.({ ok: true });
@@ -1474,13 +1202,23 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const decision = evaluateRoomTransition(ctx.room, ctx.player, 'start');
-    if (!decision.ok) {
-      ack?.({ ok: false, error: decision.error });
+    const startedAt = Date.now();
+    const result = startGame(toDomainMatch(ctx.room), ctx.playerId, {
+      now: startedAt,
+      deck: buildDeck(),
+      dealingMs: scaledDuration(getDealLockDuration(1)),
+    });
+    if (!result.ok) {
+      ack?.({ ok: false, error: result.error });
       return;
     }
-
-    startGameInRoom(ctx.room, ctx.roomCode);
+    clearLevelCompleteTimer(ctx.roomCode);
+    clearInteractionLockTimer(ctx.roomCode);
+    if (!applyDomainResult(ctx.room, result).applied) return;
+    materializeDomainEffects(ctx.roomCode, result.effects);
+    emitRoomUpdate(ctx.roomCode);
+    io.to(ctx.roomCode).emit('game:started', { version: ctx.room.version, startedAt, message: 'Game started. Get ready...' });
+    emitGameLog(ctx.roomCode, 'game:started', { byPlayerId: ctx.room.hostId, byPlayerName: getPlayerName(ctx.room, ctx.room.hostId) });
     ack?.({ ok: true });
   });
 
@@ -1491,39 +1229,22 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const retryDecision = evaluateRoomTransition(ctx.room, ctx.player, 'retry');
-    if (!retryDecision.ok) {
-      ack?.({ ok: false, error: retryDecision.error });
+    const startedAt = Date.now();
+    const result = retryGame(toDomainMatch(ctx.room), ctx.playerId, {
+      now: startedAt,
+      deck: buildDeck(),
+      dealingMs: scaledDuration(getDealLockDuration(1)),
+      retryBannerMs: scaledDuration(RESTART_BANNER_DELAY_MS),
+    });
+    if (!result.ok) {
+      ack?.({ ok: false, error: result.error });
       return;
     }
-
-    const playerCount = Object.values(ctx.room.players).length;
-    const maxLevel = maxLevelByPlayers(playerCount);
-    const startedAt = Date.now();
     clearLevelCompleteTimer(ctx.roomCode);
     clearInteractionLockTimer(ctx.roomCode);
     clearPendingStarResolution(ctx.roomCode);
-    ctx.room.status = 'in-game';
-    ctx.room.game = {
-      phase: 'focus',
-      currentLevel: 1,
-      maxLevel,
-      lives: initialLivesByPlayers(playerCount),
-      stars: 1,
-      pile: [],
-      pileHistory: [],
-      lastPlayed: null,
-      rewardMap: buildRewardMap(maxLevel),
-      mode: gameModeForRoom(ctx.room),
-      starProposal: null,
-      interactionLock: null,
-      startedAt,
-      errorCounts: {},
-      finalResults: null,
-    };
-
-    dealLevel(ctx.room);
-    setInteractionLock(ctx.room, ctx.roomCode, 'dealing', Math.max(RESTART_BANNER_DELAY_MS, getDealLockDuration(ctx.room.game.currentLevel)));
+    if (!applyDomainResult(ctx.room, result).applied) return;
+    materializeDomainEffects(ctx.roomCode, result.effects);
     emitRoomUpdate(ctx.roomCode);
     io.to(ctx.roomCode).emit('game:restarted', {
       version: ctx.room.version,
@@ -1541,7 +1262,7 @@ io.on('connection', (socket) => {
         ack?.({ ok: false, error: 'Invalid card' });
         return;
       }
-      ack?.(playCardInRoom(ctx.room, ctx.roomCode, ctx.player, parsed.value.card));
+      ack?.(playCardWithDomain(ctx.room, ctx.roomCode, ctx.player, parsed.value.card));
       return;
     }
     if (!ctx) {
@@ -1557,16 +1278,17 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const transition = evaluateRoomTransition(ctx.room, ctx.player, 'pause');
-    if (!transition.ok) {
-      ack?.({ ok: false, error: transition.error });
+    const result = pauseRound(toDomainMatch(ctx.room), ctx.playerId, Date.now());
+    if (!result.ok) {
+      ack?.({ ok: false, error: result.error });
       return;
     }
-
-    pauseRoundForReady(ctx.room, ctx.roomCode);
+    if (!applyDomainResult(ctx.room, result).applied) return;
+    clearCpuTurn(ctx.roomCode);
 
     emitRoomUpdate(ctx.roomCode);
-    io.to(ctx.roomCode).emit('game:paused', createPauseEventPayload(ctx.room.version, ctx.playerId));
+    const pausePayload = { version: ctx.room.version, by: ctx.playerId, message: 'Pause requested. The hive waits only for players still carrying cards.' };
+    io.to(ctx.roomCode).emit('game:paused', pausePayload);
     emitGameLog(ctx.roomCode, 'game:paused', { byPlayerId: ctx.playerId, byPlayerName: ctx.player.name });
     ack?.({ ok: true });
   });
@@ -1577,27 +1299,12 @@ io.on('connection', (socket) => {
       ack?.({ ok: false, error: 'Invalid game state' });
       return;
     }
-
-    const transition = evaluateRoomTransition(ctx.room, ctx.player, 'propose-star');
-    if (!transition.ok) {
-      ack?.({ ok: false, error: transition.error });
+    const result = proposeStar(toDomainMatch(ctx.room), ctx.playerId, starInput());
+    if (!result.ok) {
+      ack?.({ ok: false, error: result.error });
       return;
     }
-
-    if (!ctx.room.game.starProposal) {
-      ctx.room.game.starProposal = {
-        initiatorId: ctx.playerId,
-        acceptedBy: new Set([ctx.playerId]),
-      };
-      emitGameLog(ctx.roomCode, 'game:star-proposed', {
-        byPlayerId: ctx.playerId,
-        byPlayerName: ctx.player.name,
-      });
-    }
-
-    acceptCpuStarVotes(ctx.room, ctx.roomCode);
-    resolveStarIfEveryoneAccepted(ctx.room, ctx.roomCode);
-    emitRoomUpdate(ctx.roomCode);
+    applyStarResult(ctx.room, ctx.roomCode, result);
     ack?.({ ok: true });
   });
 
@@ -1607,31 +1314,12 @@ io.on('connection', (socket) => {
       ack?.({ ok: false, error: 'There is no active star proposal' });
       return;
     }
-    const transition = evaluateRoomTransition(ctx.room, ctx.player, 'accept-star');
-    if (!transition.ok) {
-      ack?.({ ok: false, error: transition.error });
+    const result = acceptStar(toDomainMatch(ctx.room), ctx.playerId, starInput());
+    if (!result.ok) {
+      ack?.({ ok: false, error: result.error });
       return;
     }
-
-    if (ctx.room.game.starProposal.acceptedBy.has(ctx.playerId)) {
-      ack?.({ ok: true });
-      return;
-    }
-
-    ctx.room.game.starProposal.acceptedBy.add(ctx.playerId);
-    emitGameLog(ctx.roomCode, 'game:star-accepted', {
-      byPlayerId: ctx.playerId,
-      byPlayerName: ctx.player.name,
-    });
-
-    acceptCpuStarVotes(ctx.room, ctx.roomCode);
-    if (resolveStarIfEveryoneAccepted(ctx.room, ctx.roomCode)) {
-      emitRoomUpdate(ctx.roomCode);
-      ack?.({ ok: true });
-      return;
-    }
-
-    emitRoomUpdate(ctx.roomCode);
+    applyStarResult(ctx.room, ctx.roomCode, result);
     ack?.({ ok: true });
   });
 
@@ -1641,14 +1329,12 @@ io.on('connection', (socket) => {
       ack?.({ ok: false, error: 'There is no active star proposal' });
       return;
     }
-    const transition = evaluateRoomTransition(ctx.room, ctx.player, 'cancel-star');
-    if (!transition.ok) {
-      ack?.({ ok: false, error: transition.error });
+    const result = cancelStar(toDomainMatch(ctx.room), ctx.playerId, Date.now());
+    if (!result.ok) {
+      ack?.({ ok: false, error: result.error });
       return;
     }
-
-    ctx.room.game.starProposal = null;
-    emitRoomUpdate(ctx.roomCode);
+    applyStarResult(ctx.room, ctx.roomCode, result);
     scheduleCpuTurn(ctx.roomCode, 0);
     ack?.({ ok: true });
   });
@@ -1659,14 +1345,12 @@ io.on('connection', (socket) => {
       ack?.({ ok: false, error: 'There is no active star proposal' });
       return;
     }
-    const transition = evaluateRoomTransition(ctx.room, ctx.player, 'reject-star');
-    if (!transition.ok) {
-      ack?.({ ok: false, error: transition.error });
+    const result = rejectStar(toDomainMatch(ctx.room), ctx.playerId, Date.now());
+    if (!result.ok) {
+      ack?.({ ok: false, error: result.error });
       return;
     }
-
-    ctx.room.game.starProposal = null;
-    emitRoomUpdate(ctx.roomCode);
+    applyStarResult(ctx.room, ctx.roomCode, result);
     scheduleCpuTurn(ctx.roomCode, 0);
     ack?.({ ok: true });
   });
