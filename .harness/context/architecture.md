@@ -135,6 +135,7 @@ apps/frontend/src/
 - `domain/cards.ts` es el único propietario de mínimo propio, bloqueantes, penalización de vida, `errorCounts`, descartes de error y outcomes de carta. `materializeCardEffects()` solo programa `error-expired`, `round-flip-expired` y `round-unflip-expired`, reaplica el resultado atómico y traduce eventos sin recalcular la regla.
 - `domain/star.ts` es el único propietario de propuesta, votos, consenso, consumo, preview, settlement y outcome de estrella. `starAnimation.ts` recibe el preview y el efecto ya decididos para esperar sockets/acks, desconexión o deadline; no calcula participantes de negocio ni muta manos, estrellas, fase o locks.
 - `domain/progression.ts` es el único propietario de recompensa, topes, avance de nivel, bloqueo de readiness, derrota y victoria; `domain/scoring.ts` es el único propietario de puntuación, bandas, mensajes, penalizaciones y orden final. El scheduler de `index.ts` solo devuelve los efectos `next-level-expired` y `level-ready-expired` al dominio y traduce sus eventos ya decididos.
+- Un `event-message-overlay` visible bloquea todos los controles de gameplay del frontend, incluida la carta principal, aunque la capacidad privada siga habilitada; los handlers repiten la guarda para evitar emisiones por carrera. Controles auxiliares como log o salida no forman parte de este bloqueo.
 
 # Reglas de legibilidad
 

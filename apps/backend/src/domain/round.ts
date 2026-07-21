@@ -61,7 +61,7 @@ export function pauseRound(match: DomainMatch, actorId: string, now: number): Do
   Object.values(next.players).forEach((player) => {
     if (player.isCpu) { player.connected = true; player.ready = true; }
   });
-  return succeeded(next, [{ type: 'round-paused', playerId: actorId }]);
+  return succeeded(next, [{ type: 'round-pause-requested', playerId: actorId }]);
 }
 
 /** Resolves a timer only when its original phase, lock reason and deadline still match. */

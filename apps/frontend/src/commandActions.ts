@@ -24,13 +24,17 @@ type BuildCommandActionsInput = {
   showProposeStar: boolean;
   showHivePlaceholder: boolean;
   placeholderLabel: string;
-  readyOverlayBlocked: boolean;
+  gameplayOverlayBlocked: boolean;
   /** Presentation-only legacy inputs; command authorization never reads them. */
   isPlaying?: boolean;
   interactionBlocked?: boolean;
   isInGame: boolean;
   phase: string | null;
 };
+
+export function gameplayControlDisabled(actionEnabled: boolean | undefined, gameplayOverlayBlocked: boolean): boolean {
+  return !actionEnabled || gameplayOverlayBlocked;
+}
 
 export function buildCommandActions(input: BuildCommandActionsInput): CommandAction[] {
   const showReady = Boolean(input.readyAction?.visible);
@@ -57,7 +61,7 @@ export function buildCommandActions(input: BuildCommandActionsInput): CommandAct
           label: 'Retirar propuesta',
           icon: 'star',
           className: 'command-button star full-span',
-          disabled: !input.cancelStarAction?.enabled,
+          disabled: gameplayControlDisabled(input.cancelStarAction?.enabled, input.gameplayOverlayBlocked),
         }
       : null,
     input.showAcceptStar
@@ -66,7 +70,7 @@ export function buildCommandActions(input: BuildCommandActionsInput): CommandAct
           label: 'Accept star',
           icon: 'handshake',
           className: 'command-button pulse',
-          disabled: !input.acceptStarAction?.enabled,
+          disabled: gameplayControlDisabled(input.acceptStarAction?.enabled, input.gameplayOverlayBlocked),
         }
       : null,
     input.showRejectStar
@@ -75,7 +79,7 @@ export function buildCommandActions(input: BuildCommandActionsInput): CommandAct
           label: 'Reject star',
           icon: 'close',
           className: 'command-button secondary',
-          disabled: !input.rejectStarAction?.enabled,
+          disabled: gameplayControlDisabled(input.rejectStarAction?.enabled, input.gameplayOverlayBlocked),
         }
       : null,
     input.showProposeStar
@@ -84,7 +88,7 @@ export function buildCommandActions(input: BuildCommandActionsInput): CommandAct
           label: 'Propose star',
           icon: 'star',
           className: 'command-button star',
-          disabled: !input.proposeStarAction?.enabled,
+          disabled: gameplayControlDisabled(input.proposeStarAction?.enabled, input.gameplayOverlayBlocked),
         }
       : null,
     showPause && !input.showCancelStar && !input.showAcceptStar && !input.showRejectStar
@@ -93,7 +97,7 @@ export function buildCommandActions(input: BuildCommandActionsInput): CommandAct
           label: 'Pause',
           icon: 'pause',
           className: `command-button secondary${input.showProposeStar ? '' : ' full-span'}`,
-          disabled: !input.pauseAction?.enabled,
+          disabled: gameplayControlDisabled(input.pauseAction?.enabled, input.gameplayOverlayBlocked),
         }
       : null,
     showStart
@@ -102,7 +106,7 @@ export function buildCommandActions(input: BuildCommandActionsInput): CommandAct
           label: 'Start',
           icon: 'play_arrow',
           className: 'command-button',
-          disabled: !input.startAction?.enabled,
+          disabled: gameplayControlDisabled(input.startAction?.enabled, input.gameplayOverlayBlocked),
         }
       : null,
     showReady
@@ -111,7 +115,7 @@ export function buildCommandActions(input: BuildCommandActionsInput): CommandAct
           label: 'Ready',
           icon: 'task_alt',
           className: 'command-button pulse',
-          disabled: !input.readyAction?.enabled || input.readyOverlayBlocked,
+          disabled: gameplayControlDisabled(input.readyAction?.enabled, input.gameplayOverlayBlocked),
         }
       : null,
     showNotReady
@@ -128,7 +132,7 @@ export function buildCommandActions(input: BuildCommandActionsInput): CommandAct
             label: 'Waiting',
             icon: 'hourglass_top',
             className: 'command-button secondary',
-            disabled: !input.unreadyAction?.enabled || input.readyOverlayBlocked,
+            disabled: gameplayControlDisabled(input.unreadyAction?.enabled, input.gameplayOverlayBlocked),
           }
       : null,
     showHivePlaceholderAction

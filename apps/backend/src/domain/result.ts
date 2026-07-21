@@ -7,7 +7,7 @@ export type DomainEvent =
   | { type: 'error-penalty'; playerId: string; card: number; blockingCards: Array<{ value: number; playerId: string }>; lifeLost: number }
   | { type: 'card-discarded'; playerId: string; card: number; reason: 'error' | 'star' }
   | { type: 'card-outcome'; outcome: 'game-over' | 'level-complete' | 'pause' }
-  | { type: 'round-paused'; playerId: string }
+  | { type: 'round-pause-requested'; playerId: string }
   | { type: 'star-proposed'; playerId: string }
   | { type: 'star-accepted'; playerId: string }
   | { type: 'star-used'; playerId: string; discarded: DomainStarDiscardPreview[] }

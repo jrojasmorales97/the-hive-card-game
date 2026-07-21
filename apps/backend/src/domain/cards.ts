@@ -117,7 +117,7 @@ export function expireCardEffect(match: DomainMatch, actorId: string, effect: Do
     const pause = evaluateGameTransition(machineState(next, pauseActorId), 'pause', now);
     if (!pause.ok) return rejected(pause.error);
     applyPatch(next, pause.patch);
-    return succeeded(next, [{ type: 'round-paused', playerId: pauseActorId }, { type: 'card-outcome', outcome: resolved }]);
+    return succeeded(next, [{ type: 'card-outcome', outcome: resolved }]);
   }
   if (resolved === 'level-complete' && next.game) next.game.phase = 'level-complete';
   return succeeded(next, [{ type: 'card-outcome', outcome: resolved }]);

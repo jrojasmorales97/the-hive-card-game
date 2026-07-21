@@ -33,6 +33,7 @@ type Snapshot = {
 type CreateAck = { ok: boolean; snapshot: Snapshot; room: { code: string } };
 
 type Ack = { ok: boolean; error?: string };
+type GameLog = { type: string };
 
 test.after(async () => stopIntegrationServer());
 
@@ -198,7 +199,7 @@ test('invalid wire payloads are rejected without mutating state or disconnecting
   assert.equal(host.connected, true);
 });
 
-test('current baseline: start, ready, correct play, pause, resume, and error penalty use real sockets', async (t) => {
+test('manual pause emits its message while an error pauses silently for ready-up', async (t) => {
   const { url } = await startIntegrationServer();
   const clients: TestClient[] = [];
   t.after(async () => closeIntegration(clients));
@@ -225,13 +226,21 @@ test('current baseline: start, ready, correct play, pause, resume, and error pen
   await playingAgain;
 
   const paused = waitForEvent<{ by: string }>(host, 'game:paused');
+  const pauseLog = waitForEvent<GameLog>(host, 'game:log', (entry) => entry.type === 'game:paused');
   assert.equal((await emitWithAck<Ack>(host, 'game:pause-request')).ok, true);
   assert.equal((await paused).by, 'host-0001');
+  assert.equal((await pauseLog).type, 'game:paused');
   const resumed = waitForEvent<Snapshot>(host, 'room:snapshot', (snapshot) => snapshot.publicState.game?.phase === 'playing');
   assert.equal((await emitWithAck<Ack>(host, 'player:ready', { ready: true })).ok, true);
   assert.equal((await emitWithAck<Ack>(guest, 'player:ready', { ready: true })).ok, true);
   await resumed;
 
+  const automaticPauseMessages: unknown[] = [];
+  const automaticPauseLogs: GameLog[] = [];
+  host.on('game:paused', (payload) => automaticPauseMessages.push(payload));
+  host.on('game:log', (entry: GameLog) => {
+    if (entry.type === 'game:paused') automaticPauseLogs.push(entry);
+  });
   const [hostState, guestState] = await Promise.all([resync(host), resync(guest)]);
   const errorPlay = hostState.privateState.hand[0] > guestState.privateState.hand[0]
     ? { client: host, card: hostState.privateState.hand[0] }
@@ -241,6 +250,8 @@ test('current baseline: start, ready, correct play, pause, resume, and error pen
   assert.equal((await penalty).lifeLost, 1);
   const afterPenalty = await waitForEvent<Snapshot>(host, 'room:snapshot', (snapshot) => snapshot.publicState.game?.phase === 'paused');
   assert.equal(afterPenalty.publicState.game?.lives, 1);
+  assert.deepEqual(automaticPauseMessages, []);
+  assert.deepEqual(automaticPauseLogs, []);
 });
 
 test('current baseline: star proposals vote, reject, cancel, and settle after animation acknowledgements', async (t) => {
@@ -280,7 +291,11 @@ test('star settlement pauses for ready-up without emitting a pause-requested mes
   await readyRound(host, guest);
 
   const pausedMessages: unknown[] = [];
+  const pausedLogs: GameLog[] = [];
   host.on('game:paused', (payload) => pausedMessages.push(payload));
+  host.on('game:log', (entry: GameLog) => {
+    if (entry.type === 'game:paused') pausedLogs.push(entry);
+  });
   assert.equal((await emitWithAck<Ack>(host, 'star:propose')).ok, true);
   const used = waitForEvent(host, 'game:star-used');
   assert.equal((await emitWithAck<Ack>(guest, 'star:accept')).ok, true);
@@ -291,6 +306,7 @@ test('star settlement pauses for ready-up without emitting a pause-requested mes
   const paused = await waitForSnapshot(host, (snapshot) => snapshot.publicState.game?.phase === 'paused');
   assert.equal(paused.publicState.game?.phase, 'paused');
   assert.deepEqual(pausedMessages, []);
+  assert.deepEqual(pausedLogs, []);
 });
 
 test('current baseline: error overlays end in defeat and host retry resets the same room', async (t) => {

@@ -9,7 +9,7 @@ import {
   VICTORY_SUBTITLE,
   deferOverlayMs,
   overlayDurationMs,
-  readyOverlayBlockedReason,
+  gameplayOverlayBlockedReason,
   overlaySubtitle,
 } from './messageTiming.js';
 
@@ -21,11 +21,11 @@ test('overlayDurationMs returns the planned durations for each overlay kind', ()
   assert.equal(overlayDurationMs('restarted'), 5000);
 });
 
-test('ready stays blocked until pause and level-complete messages disappear', () => {
-  assert.equal(readyOverlayBlockedReason('pause'), 'Wait until the pause message finishes');
-  assert.equal(readyOverlayBlockedReason('level-complete'), 'Wait until the level clear message finishes');
-  assert.equal(readyOverlayBlockedReason('error'), null);
-  assert.equal(readyOverlayBlockedReason(null), null);
+test('every visible gameplay overlay blocks actions until its message disappears', () => {
+  for (const kind of ['error', 'pause', 'star-used', 'level-complete', 'restarted'] as const) {
+    assert.equal(gameplayOverlayBlockedReason(kind), 'Wait until the current message finishes');
+  }
+  assert.equal(gameplayOverlayBlockedReason(null), null);
 });
 
 test('INFO_MESSAGE_DURATION_MS keeps short informational messages brief', () => {

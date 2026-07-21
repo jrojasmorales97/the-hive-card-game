@@ -46,7 +46,7 @@ import { buildHandLayout, buildHandSlotPath, type HandSlotId } from './handLayou
 import { podiumToneForRank, shouldUseTwoColumnFinalScoreLayout, timingFeedbackForBand } from './finalScoreUi.js';
 import { levelCompleteOverlayDelayMs } from './levelFlow.js';
 import { buildLobbySeats, shouldShowTopbarRoomCode, waitingRoomMessage } from './lobbyUi.js';
-import { buildCommandActions } from './commandActions.js';
+import { buildCommandActions, gameplayControlDisabled } from './commandActions.js';
 import logoUrl from '../the-hive-logo.png';
 import {
   DEFEAT_SUBTITLE,
@@ -54,7 +54,7 @@ import {
   VICTORY_SUBTITLE,
   overlayDurationMs,
   overlaySubtitle,
-  readyOverlayBlockedReason,
+  gameplayOverlayBlockedReason,
 } from './messageTiming.js';
 
 type Player = PublicRoomState['players'][number];
@@ -1506,8 +1506,9 @@ export function App() {
   const cancelStarAction = actionFor('cancel_star');
   const rejectStarAction = actionFor('reject_star');
   const roundOutWaitAction = actionFor('round_out_wait');
-  const readyOverlayError = readyOverlayBlockedReason(eventOverlay?.kind);
-  const readyOverlayBlocked = readyOverlayError !== null;
+  const visibleGameplayOverlayKind = game?.phase === 'victory' || game?.phase === 'game-over' ? null : eventOverlay?.kind;
+  const gameplayOverlayError = gameplayOverlayBlockedReason(visibleGameplayOverlayKind);
+  const gameplayOverlayBlocked = gameplayOverlayError !== null;
   const prepLabel =
     activeInteractionLock?.reason === 'dealing'
       ? 'The hive is dealing the next pulse'
@@ -1629,7 +1630,7 @@ export function App() {
     showProposeStar,
     showHivePlaceholder: showHivePlaceholder || showRoundClearingPlaceholder,
     placeholderLabel,
-    readyOverlayBlocked,
+    gameplayOverlayBlocked,
     isInGame: room?.status === 'in-game',
     phase: game?.phase ?? null,
   }).map((action) => ({
@@ -1776,8 +1777,8 @@ export function App() {
   function setReady(ready: boolean) {
     setError('');
     const targetAction = ready ? readyAction : unreadyAction;
-    if (!targetAction?.enabled || readyOverlayBlocked) {
-      setError(readyOverlayError ?? targetAction?.reason ?? 'Could not update ready state');
+    if (!targetAction?.enabled || gameplayOverlayBlocked) {
+      setError(gameplayOverlayError ?? targetAction?.reason ?? 'Could not update ready state');
       return;
     }
     if (!socket) return;
@@ -1789,8 +1790,8 @@ export function App() {
   function startGame() {
     setError('');
     setInfo('');
-    if (!startAction?.enabled) {
-      setError(startAction?.reason ?? 'Could not start game');
+    if (!startAction?.enabled || gameplayOverlayBlocked) {
+      setError(gameplayOverlayError ?? startAction?.reason ?? 'Could not start game');
       return;
     }
     if (!socket) return;
@@ -1804,8 +1805,8 @@ export function App() {
 
   function playCard(card: number) {
     setError('');
-    if (!playCardAction?.enabled) {
-      setError(playCardAction?.reason ?? 'You cannot play a card right now');
+    if (!playCardAction?.enabled || gameplayOverlayBlocked) {
+      setError(gameplayOverlayError ?? playCardAction?.reason ?? 'You cannot play a card right now');
       return;
     }
 
@@ -1837,8 +1838,8 @@ export function App() {
 
   function requestPause() {
     setError('');
-    if (!pauseAction?.enabled) {
-      setError(pauseAction?.reason ?? 'Could not pause');
+    if (!pauseAction?.enabled || gameplayOverlayBlocked) {
+      setError(gameplayOverlayError ?? pauseAction?.reason ?? 'Could not pause');
       return;
     }
     if (!socket) return;
@@ -1849,8 +1850,8 @@ export function App() {
 
   function proposeStar() {
     setError('');
-    if (!proposeStarAction?.enabled) {
-      setError(proposeStarAction?.reason ?? 'Could not propose star');
+    if (!proposeStarAction?.enabled || gameplayOverlayBlocked) {
+      setError(gameplayOverlayError ?? proposeStarAction?.reason ?? 'Could not propose star');
       return;
     }
     if (!socket) return;
@@ -1861,8 +1862,8 @@ export function App() {
 
   function acceptStar() {
     setError('');
-    if (!acceptStarAction?.enabled) {
-      setError(acceptStarAction?.reason ?? 'Could not accept star');
+    if (!acceptStarAction?.enabled || gameplayOverlayBlocked) {
+      setError(gameplayOverlayError ?? acceptStarAction?.reason ?? 'Could not accept star');
       return;
     }
     if (!socket) return;
@@ -1873,8 +1874,8 @@ export function App() {
 
   function cancelStarProposal() {
     setError('');
-    if (!cancelStarAction?.enabled) {
-      setError(cancelStarAction?.reason ?? 'Could not cancel star proposal');
+    if (!cancelStarAction?.enabled || gameplayOverlayBlocked) {
+      setError(gameplayOverlayError ?? cancelStarAction?.reason ?? 'Could not cancel star proposal');
       return;
     }
     if (!socket) return;
@@ -1885,8 +1886,8 @@ export function App() {
 
   function rejectStar() {
     setError('');
-    if (!rejectStarAction?.enabled) {
-      setError(rejectStarAction?.reason ?? 'Could not reject star');
+    if (!rejectStarAction?.enabled || gameplayOverlayBlocked) {
+      setError(gameplayOverlayError ?? rejectStarAction?.reason ?? 'Could not reject star');
       return;
     }
     if (!socket) return;
@@ -1964,6 +1965,10 @@ export function App() {
     if (!socket) return;
     setError('');
     setInfo('');
+    if (gameplayOverlayBlocked) {
+      setError(gameplayOverlayError ?? 'Wait until the current message finishes');
+      return;
+    }
 
     const response = await emitWithAck<any>('game:retry');
     if (!response?.ok) {
@@ -2540,7 +2545,7 @@ export function App() {
                   </div>
                 </div>
 
-                <div className="command-action-row">
+                <div className="command-action-row" aria-busy={gameplayOverlayBlocked}>
                   {commandActions.map((action) => (
                     <button
                       key={action.key}
@@ -2613,9 +2618,9 @@ export function App() {
                     <div className="primary-slot-shell" ref={setHandSlotRef('primary')}>
                       <button
                         ref={setHandCardRef(primaryCard)}
-                        className={`card face primary-card${playCardAction?.enabled && primaryCard === minPlayableCard ? ' playable' : ''}${isStarDiscardCard(primaryCard) ? ' is-star-discarding' : ''}${shouldHideHandCardForStarDiscard(primaryCard) ? ' hand-card-hidden-for-flight' : ''}`}
+                        className={`card face primary-card${!gameplayControlDisabled(playCardAction?.enabled, gameplayOverlayBlocked) && primaryCard === minPlayableCard ? ' playable' : ''}${isStarDiscardCard(primaryCard) ? ' is-star-discarding' : ''}${shouldHideHandCardForStarDiscard(primaryCard) ? ' hand-card-hidden-for-flight' : ''}`}
                         onClick={() => playCard(primaryCard)}
-                        disabled={!playCardAction?.enabled || primaryCard !== minPlayableCard}
+                        disabled={gameplayControlDisabled(playCardAction?.enabled, gameplayOverlayBlocked) || primaryCard !== minPlayableCard}
                         title="Play this card"
                         style={{ borderColor: playerColorMap.get(playerId) ?? undefined } as any}
                       >

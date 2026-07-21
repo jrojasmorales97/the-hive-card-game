@@ -1,7 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildCommandActions } from './commandActions.js';
+import { buildCommandActions, gameplayControlDisabled } from './commandActions.js';
+
+test('gameplayControlDisabled blocks an enabled control whenever a message overlay is visible', () => {
+  assert.equal(gameplayControlDisabled(true, false), false);
+  assert.equal(gameplayControlDisabled(true, true), true);
+  assert.equal(gameplayControlDisabled(false, false), true);
+  assert.equal(gameplayControlDisabled(undefined, false), true);
+});
 
 test('buildCommandActions maps round-out private actions to a disabled hive placeholder', () => {
   const actions = buildCommandActions({
@@ -17,7 +24,7 @@ test('buildCommandActions maps round-out private actions to a disabled hive plac
     showProposeStar: false,
     showHivePlaceholder: false,
     placeholderLabel: 'The hive is tuning the next pulse',
-    readyOverlayBlocked: false,
+    gameplayOverlayBlocked: false,
     isPlaying: false,
     interactionBlocked: false,
     isInGame: true,
@@ -48,7 +55,7 @@ test('buildCommandActions keeps waiting CTA for active players that already read
     showProposeStar: false,
     showHivePlaceholder: false,
     placeholderLabel: 'The hive is tuning the next pulse',
-    readyOverlayBlocked: false,
+    gameplayOverlayBlocked: false,
     isPlaying: false,
     interactionBlocked: false,
     isInGame: true,
@@ -72,7 +79,7 @@ test('buildCommandActions keeps ready visible for active players and respects ov
     showProposeStar: false,
     showHivePlaceholder: false,
     placeholderLabel: 'The hive is tuning the next pulse',
-    readyOverlayBlocked: true,
+    gameplayOverlayBlocked: true,
     isPlaying: false,
     interactionBlocked: false,
     isInGame: true,
@@ -99,7 +106,7 @@ test('buildCommandActions maps start and waiting commands from private capabilit
     showProposeStar: false,
     showHivePlaceholder: false,
     placeholderLabel: 'The hive is tuning the next pulse',
-    readyOverlayBlocked: false,
+    gameplayOverlayBlocked: false,
     isInGame: false,
     phase: null,
   });
@@ -111,7 +118,7 @@ test('buildCommandActions maps start and waiting commands from private capabilit
     showProposeStar: false,
     showHivePlaceholder: false,
     placeholderLabel: 'The hive is tuning the next pulse',
-    readyOverlayBlocked: false,
+    gameplayOverlayBlocked: false,
     isInGame: true,
     phase: 'focus',
   });
@@ -123,7 +130,7 @@ test('buildCommandActions maps start and waiting commands from private capabilit
     showProposeStar: false,
     showHivePlaceholder: true,
     placeholderLabel: 'The hive is dealing the next pulse',
-    readyOverlayBlocked: false,
+    gameplayOverlayBlocked: false,
     isInGame: true,
     phase: 'focus',
   });
@@ -160,7 +167,7 @@ test('buildCommandActions keeps star consensus CTAs ahead of the round-out place
     showProposeStar: false,
     showHivePlaceholder: false,
     placeholderLabel: 'The hive is tuning the next pulse',
-    readyOverlayBlocked: false,
+    gameplayOverlayBlocked: false,
     isPlaying: true,
     interactionBlocked: false,
     isInGame: true,
@@ -194,7 +201,7 @@ test('buildCommandActions derives cancel and reject disabled states from private
     showProposeStar: false,
     showHivePlaceholder: false,
     placeholderLabel: 'The hive is tuning the next pulse',
-    readyOverlayBlocked: false,
+    gameplayOverlayBlocked: false,
     isInGame: true,
     phase: 'playing',
   });
@@ -206,7 +213,7 @@ test('buildCommandActions derives cancel and reject disabled states from private
     showProposeStar: false,
     showHivePlaceholder: false,
     placeholderLabel: 'The hive is tuning the next pulse',
-    readyOverlayBlocked: false,
+    gameplayOverlayBlocked: false,
     isInGame: true,
     phase: 'playing',
   });
@@ -235,7 +242,7 @@ test('buildCommandActions preserves gameplay CTAs before fallback placeholders',
     showProposeStar: true,
     showHivePlaceholder: false,
     placeholderLabel: 'The hive is tuning the next pulse',
-    readyOverlayBlocked: false,
+    gameplayOverlayBlocked: false,
     isPlaying: true,
     interactionBlocked: false,
     isInGame: true,
@@ -260,6 +267,54 @@ test('buildCommandActions preserves gameplay CTAs before fallback placeholders',
   ]);
 });
 
+test('buildCommandActions disables every gameplay command while a message overlay is visible', () => {
+  const setupActions = buildCommandActions({
+    startAction: { type: 'start', visible: true, enabled: true },
+    readyAction: { type: 'ready', visible: true, enabled: true },
+    unreadyAction: { type: 'unready', visible: true, enabled: true },
+    showCancelStar: false,
+    showAcceptStar: false,
+    showRejectStar: false,
+    showProposeStar: false,
+    showHivePlaceholder: false,
+    placeholderLabel: 'The hive is tuning the next pulse',
+    gameplayOverlayBlocked: true,
+    isInGame: true,
+    phase: 'focus',
+  });
+  const playingActions = buildCommandActions({
+    pauseAction: { type: 'pause', visible: true, enabled: true },
+    proposeStarAction: { type: 'propose_star', visible: true, enabled: true },
+    showCancelStar: false,
+    showAcceptStar: false,
+    showRejectStar: false,
+    showProposeStar: true,
+    showHivePlaceholder: false,
+    placeholderLabel: 'The hive is tuning the next pulse',
+    gameplayOverlayBlocked: true,
+    isInGame: true,
+    phase: 'playing',
+  });
+  const consensusActions = buildCommandActions({
+    cancelStarAction: { type: 'cancel_star', visible: true, enabled: true },
+    acceptStarAction: { type: 'accept_star', visible: true, enabled: true },
+    rejectStarAction: { type: 'reject_star', visible: true, enabled: true },
+    showCancelStar: true,
+    showAcceptStar: true,
+    showRejectStar: true,
+    showProposeStar: false,
+    showHivePlaceholder: false,
+    placeholderLabel: 'The hive is tuning the next pulse',
+    gameplayOverlayBlocked: true,
+    isInGame: true,
+    phase: 'playing',
+  });
+
+  const actions = [...setupActions, ...playingActions, ...consensusActions];
+  assert.deepEqual(actions.map((action) => action.key), ['start', 'ready', 'waiting', 'star', 'pause', 'cancel-star', 'accept-star', 'reject-star']);
+  assert.ok(actions.every((action) => action.disabled));
+});
+
 test('buildCommandActions falls back to layout placeholder during in-game idle states', () => {
   const actions = buildCommandActions({
     showCancelStar: false,
@@ -268,7 +323,7 @@ test('buildCommandActions falls back to layout placeholder during in-game idle s
     showProposeStar: false,
     showHivePlaceholder: false,
     placeholderLabel: 'The hive is tuning the next pulse',
-    readyOverlayBlocked: false,
+    gameplayOverlayBlocked: false,
     isPlaying: false,
     interactionBlocked: false,
     isInGame: true,

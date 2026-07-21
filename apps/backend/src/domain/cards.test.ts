@@ -62,7 +62,7 @@ test('an error loses one bounded life, counts once, discards all sorted blockers
   assert.deepEqual(result.effects, [{ type: 'schedule', trigger: 'error-expired', dueAt: 150, expected: { phase: 'playing', lockReason: 'error', lockUntil: 150 } }]);
 });
 
-test('error expiration rejects stale callbacks and emits the post-overlay pause or defeat without recalculation in the shell', () => {
+test('error expiration pauses silently or declares defeat without recalculation in the shell', () => {
   const continuing = match();
   continuing.players.alpha.hand = [8];
   continuing.players.beta.hand = [2, 5, 10];
@@ -75,7 +75,7 @@ test('error expiration rejects stale callbacks and emits the post-overlay pause 
   assert.equal(paused.ok, true);
   if (!paused.ok) return;
   assert.equal(paused.state.game?.phase, 'paused');
-  assert.deepEqual(paused.events.map((event) => event.type), ['round-paused', 'card-outcome']);
+  assert.deepEqual(paused.events, [{ type: 'card-outcome', outcome: 'pause' }]);
 
   const defeated = match();
   defeated.players.alpha.hand = [8];

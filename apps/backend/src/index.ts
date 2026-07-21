@@ -544,6 +544,15 @@ function cardDurations(): CardDurations {
   };
 }
 
+function translatePauseRequest(room: Room, roomCode: string, events: DomainEvent[]): void {
+  const requested = events.find((event) => event.type === 'round-pause-requested');
+  if (!requested) return;
+  const by = requested.playerId;
+  const pausePayload = { version: room.version, by, message: 'Pause requested. The hive waits only for players still carrying cards.' };
+  io.to(roomCode).emit('game:paused', pausePayload);
+  emitGameLog(roomCode, 'game:paused', { byPlayerId: by, byPlayerName: getPlayerName(room, by) });
+}
+
 function translateCardEvents(room: Room, roomCode: string, events: DomainEvent[]): { terminal: boolean; continueRound: boolean } {
   let terminal = false;
   let continueRound = false;
@@ -559,12 +568,6 @@ function translateCardEvents(room: Room, roomCode: string, events: DomainEvent[]
     }
     if (event.type === 'card-discarded') {
       emitGameLog(roomCode, 'game:discard', { card: event.card, playerId: event.playerId, playerName: getPlayerName(room, event.playerId) });
-    }
-    if (event.type === 'round-paused') {
-      const by = event.playerId;
-      const pausePayload = { version: room.version, by, message: 'Pause requested. The hive waits only for players still carrying cards.' };
-      io.to(roomCode).emit('game:paused', pausePayload);
-      emitGameLog(roomCode, 'game:paused', { byPlayerId: by, byPlayerName: getPlayerName(room, by) });
     }
     if (event.type === 'card-outcome') {
       if (event.outcome === 'pause') continueRound = true;
@@ -664,12 +667,6 @@ function translateStarEvents(room: Room, roomCode: string, events: DomainEvent[]
     }
     if (event.type === 'card-discarded' && event.reason === 'star') {
       emitGameLog(roomCode, 'game:discard', { card: event.card, playerId: event.playerId, playerName: getPlayerName(room, event.playerId), reason: 'star' });
-    }
-    if (event.type === 'round-paused') {
-      const by = event.playerId;
-      const pausePayload = { version: room.version, by, message: 'Pause requested. The hive waits only for players still carrying cards.' };
-      io.to(roomCode).emit('game:paused', pausePayload);
-      emitGameLog(roomCode, 'game:paused', { byPlayerId: by, byPlayerName: getPlayerName(room, by) });
     }
     if (event.type === 'star-outcome' && event.outcome === 'game-over') finishGameOver(room, roomCode, 'No lives left');
   });
@@ -1283,13 +1280,12 @@ io.on('connection', (socket) => {
       ack?.({ ok: false, error: result.error });
       return;
     }
-    if (!applyDomainResult(ctx.room, result).applied) return;
+    const applied = applyDomainResult(ctx.room, result);
+    if (!applied.applied) return;
     clearCpuTurn(ctx.roomCode);
 
     emitRoomUpdate(ctx.roomCode);
-    const pausePayload = { version: ctx.room.version, by: ctx.playerId, message: 'Pause requested. The hive waits only for players still carrying cards.' };
-    io.to(ctx.roomCode).emit('game:paused', pausePayload);
-    emitGameLog(ctx.roomCode, 'game:paused', { byPlayerId: ctx.playerId, byPlayerName: ctx.player.name });
+    translatePauseRequest(ctx.room, ctx.roomCode, applied.events);
     ack?.({ ok: true });
   });
 

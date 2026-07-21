@@ -33,7 +33,7 @@ test('ready ignores empty hands, synchronizes CPU, and starts one canonical coun
   assert.deepEqual(setRoundReady(second.state, 'empty', true, { now: 121, countdownMs: 3_000 }), { ok: false, error: 'The countdown is already running' });
 });
 
-test('pause clears only active players and returns the declared pause event', () => {
+test('manual pause clears only active players and returns the requested-pause event', () => {
   const source = match();
   source.game!.phase = 'playing';
   source.players.alpha.ready = true;
@@ -45,7 +45,7 @@ test('pause clears only active players and returns the declared pause event', ()
   assert.equal(result.state.players.alpha.ready, false);
   assert.equal(result.state.players.empty.ready, true);
   assert.equal(result.state.players.cpu.ready, true);
-  assert.deepEqual(result.events, [{ type: 'round-paused', playerId: 'alpha' }]);
+  assert.deepEqual(result.events, [{ type: 'round-pause-requested', playerId: 'alpha' }]);
 });
 
 test('expiration rejects stale retries and only transitions the matching countdown once', () => {
