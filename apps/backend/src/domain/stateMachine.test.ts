@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { evaluateGameTransition, readyParticipants, consensusParticipants, settlementParticipants, type MachineState } from './gameStateMachine.js';
+import { evaluateGameTransition, readyParticipants, consensusParticipants, settlementParticipants, type MachineState } from './stateMachine.js';
 
 function state(overrides: Partial<MachineState> = {}): MachineState {
   return {

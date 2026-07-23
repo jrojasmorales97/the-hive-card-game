@@ -14,6 +14,7 @@ type Snapshot = {
   version: number;
   publicState: {
     code: string;
+    hostId: string;
     players: Array<{ id: string; handCount: number; socketId?: string; hand?: number[] }>;
     game: null | {
       phase: string;
@@ -155,6 +156,25 @@ test('current baseline: real Socket.IO create, join, resync and reconnect preser
   });
   assert.equal(rejoined.ok, true);
   assert.equal(rejoined.reconnected, true);
+});
+
+test('human entering a CPUON2 room is host and can start the game', async (t) => {
+  const { url } = await startIntegrationServer();
+  const clients: TestClient[] = [];
+  t.after(async () => closeIntegration(clients));
+  const human = await createClient(url);
+  clients.push(human);
+
+  const joined = await emitWithAck<{ ok: boolean; snapshot: Snapshot }>(human, 'room:join', {
+    roomCode: 'CPUON2',
+    playerName: 'Human',
+    playerId: 'human-001',
+  });
+
+  assert.equal(joined.ok, true);
+  assert.equal(joined.snapshot.publicState.hostId, 'human-001');
+  assert.equal(joined.snapshot.publicState.players.length, 3);
+  assert.equal((await emitWithAck<Ack>(human, 'game:start')).ok, true);
 });
 
 test('current baseline: transport rejects unbound clients and host kick remains lobby-only', async (t) => {

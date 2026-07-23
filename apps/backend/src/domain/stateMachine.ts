@@ -3,13 +3,13 @@ import type {
   DomainInteractionLock as InteractionLock,
   DomainInteractionLockReason as InteractionLockReason,
   DomainRoomStatus as RoomStatus,
-} from './domain/model.js';
+} from './model.js';
 import {
   consensusParticipants as domainConsensusParticipants,
   playParticipants as domainPlayParticipants,
   readyParticipants as domainReadyParticipants,
   settlementParticipants as domainSettlementParticipants,
-} from './domain/participants.js';
+} from './participants.js';
 
 export type MachinePlayer = {
   id: string;

@@ -1,8 +1,26 @@
-import { evaluateGameTransition, type GameTrigger, type MachineState } from '../gameStateMachine.js';
+import { evaluateGameTransition, type GameTrigger, type MachineState } from './stateMachine.js';
 import type { DomainMatch } from './model.js';
 import { rejected, succeeded, type DomainEffect, type DomainResult } from './result.js';
 
 export type CardDurations = { errorOverlayMs: number; roundFlipMs: number; roundUnflipMs: number };
+
+/**
+ * Chooses the next development CPU action from the canonical match only. Runtime
+ * schedulers use this decision but never derive a global minimum themselves.
+ */
+export function nextCpuCard(match: DomainMatch): { playerId: string; card: number } | null {
+  const game = match.game;
+  if (!game || game.mode !== 'dev-cpu' || game.phase !== 'playing' || game.starProposal || game.interactionLock) return null;
+  const lowest = Object.values(match.players).reduce<{ playerId: string; card: number } | null>((current, player) => {
+    if (player.hand.length === 0) return current;
+    const card = Math.min(...player.hand);
+    if (!current || card < current.card || (card === current.card && player.id.localeCompare(current.playerId) < 0)) {
+      return { playerId: player.id, card };
+    }
+    return current;
+  }, null);
+  return lowest && match.players[lowest.playerId]?.isCpu ? lowest : null;
+}
 
 function copyMatch(match: DomainMatch): DomainMatch {
   return structuredClone(match);

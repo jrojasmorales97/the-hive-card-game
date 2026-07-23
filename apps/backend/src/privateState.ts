@@ -1,5 +1,5 @@
 import type { InteractionLockReason, PrivateAction, PrivateActionType } from '@the-hive/contracts';
-import { commandDecision, type MachineState } from './gameStateMachine.js';
+import { commandDecision, type MachineState } from './domain/stateMachine.js';
 export type { InteractionLockReason, PrivateAction, PrivateActionType } from '@the-hive/contracts';
 
 export type PrivateActionContext = {

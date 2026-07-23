@@ -1,4 +1,4 @@
-import { evaluateGameTransition, type GameTrigger, type MachineState } from '../gameStateMachine.js';
+import { evaluateGameTransition, type GameTrigger, type MachineState } from './stateMachine.js';
 import type { DomainMatch, DomainRewardType } from './model.js';
 import { dealLevel } from './setup.js';
 import { calculateFinalResults } from './scoring.js';

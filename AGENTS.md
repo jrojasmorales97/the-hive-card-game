@@ -10,7 +10,7 @@
 - Documento: `.harness/context/architecture.md`
 - Leer cuando: vayas a cambiar stack, comandos, estructura de carpetas, contratos Socket.IO, la máquina de estados autoritativa, patrones backend/frontend, dependencias o workflow de despliegue observados en `docker-compose.yml`, `render.yaml`, `apps/backend/` y `apps/frontend/`.
 - Contratos Socket.IO: `packages/contracts/`; consultar antes de modificar payloads, snapshots, acks o eventos realtime.
-- Capa de dominio: `apps/backend/src/domain/` y `apps/backend/src/gameStateMachine.ts`; sus límites y propietarios canónicos están en ambos contextos.
+- Capas backend: consulta el mapa de casos de uso, permisos y poblaciones en `.harness/context/domain.md`; `apps/backend/src/application/` orquesta `apps/backend/src/domain/`.
 
 ## Artefactos SDD
 

@@ -9,16 +9,16 @@
 # Capas
 
 - Orquestacion de repo: documentacion raiz y Compose en `README.md`, `docker-compose.yml`, `render.yaml`, `business.md` y `architecture.md`.
-- Backend autoritativo: `apps/backend/src/index.ts` concentra transporte HTTP/WebSocket, estado en memoria, timers, serializacion publica/privada y las reglas aun no migradas.
-- Backend helper: `apps/backend/src/*.ts` conserva infraestructura y proyecciones como locks (`gameTiming.ts`), lobby (`lobbyRules.ts`) y coordinacion visual (`starAnimation.ts`); las reglas de juego viven en `src/domain/`.
+- Backend autoritativo: `apps/backend/src/index.ts` es composition root y lifecycle de Fastify/Socket.IO; construye infraestructura, casos de uso y registros de transporte.
+- Backend helper: `application/` orquesta comandos y efectos, `infrastructure/` posee repositorio, reloj, azar y scheduler, y `transport/socket/` conserva parsers, sesión, presenters, publisher y handlers. Las reglas viven en `src/domain/`.
 - Frontend shell: `apps/frontend/src/main.tsx` monta `App`, mientras `apps/frontend/src/App.tsx` concentra conexion Socket.IO, estado React, overlays y acciones del usuario.
 - Frontend helper: `apps/frontend/src/*.ts` extrae logica pura de sincronizacion, layout, copy y UI (`roomSync.ts`, `connectionStatus.ts`, `gameUi.ts`, `lobbyUi.ts`, `handLayout.ts`, `starUi.ts`, `finalScoreUi.ts`, `messageTiming.ts`).
 - Tests co-localizados: backend y frontend guardan tests unitarios junto a los modulos en `apps/backend/src/*.test.ts` y `apps/frontend/src/*.test.ts`.
-- Límite de dominio: `apps/backend/src/domain/` y `apps/backend/src/gameStateMachine.ts` contienen datos y decisiones puras. `setup.ts` recibe mazo/reloj/duraciones; `round.ts` ready/pausa/countdown; `cards.ts` jugada/penalización/descartes; `star.ts` consenso/preview/settlement; `progression.ts` recompensas, avance, locks de nivel y terminales; `scoring.ts` ranking con tiempo inyectado. `domainAdapter.ts` adapta el estado en memoria, `starAnimation.ts` coordina acks visuales y `index.ts` conserva Fastify, Socket.IO, timers, Maps, versionado y serialización.
+- Límite de dominio: `apps/backend/src/domain/` contiene datos y decisiones puras. `setup.ts` recibe mazo/reloj/duraciones; `round.ts` ready/pausa/countdown; `cards.ts` jugada/penalización/descartes; `star.ts` consenso/preview/settlement; `progression.ts` recompensas, avance, locks de nivel y terminales; `scoring.ts` ranking con tiempo inyectado. `StarUseCases` coordina acks visuales persistidos sin sockets y `index.ts` solo compone dependencias.
 
 # Estrategia de carpetas
 
-- Estado actual backend: `apps/backend/src/index.ts` es el entrypoint y shell monolitico; `src/domain/` contiene las reglas puras y el resto de helpers/tests sigue mayoritariamente plano bajo `src/`.
+- Estado actual backend: `apps/backend/src/index.ts` es entrypoint de composición; `src/domain/`, `src/application/`, `src/infrastructure/` y `src/transport/` tienen propietarios separados.
 - Estado actual frontend: `apps/frontend/src/main.tsx` arranca la app, `src/App.tsx` concentra conexion, estado, animacion y UI, los helpers/tests estan planos bajo `src/` y `src/styles.css` conserva la cascada global.
 - `packages/contracts/`: paquete ESM local `@the-hive/contracts`, fuente canónica de wire types, parsers runtime y mapas Socket.IO. Se divide por estado, acciones, logs y familias de eventos; no contiene estado interno ni reglas de juego.
 - `.harness/`: artefactos SDD y templates de regeneracion (`templates/`, `context/`, `plans/`, `implementations/`, `reviews/`).
@@ -66,15 +66,18 @@ apps/backend/src/
   tooling/                         # checks y reporters ejecutados por scripts
 ```
 
-- `domain/` solo importa `domain/`; `gameStateMachine.ts` se movera a `domain/stateMachine.ts` cuando un slice pueda actualizar todos sus consumidores y checks de una vez.
-- `application/` importa `domain/` y declaraciones bajo `application/ports/`; no importa Fastify, Socket.IO ni implementaciones de `infrastructure/`.
+ - `domain/stateMachine.ts` es la ubicacion canónica de la maquina; `domain/room.ts` posee las reglas puras de admision y expulsión. No existen rutas planas de compatibilidad.
+- `application/` importa `domain/` y declaraciones bajo `application/ports/`; no importa Fastify, Socket.IO ni implementaciones de `infrastructure/`. Sus cinco puertos son repositorio, publisher, reloj, random y scheduler.
 - Los puertos se crean por dependencia externa real, no por funcion. Repositorio de salas, reloj, random/barajado, scheduler y publicacion de eventos son limites candidatos; no se exige una interfaz si una funcion inyectada expresa el limite completo.
 - `infrastructure/` implementa puertos y puede usar `Map`, reloj real, random y timers; no decide fases, elegibilidad, recursos, progreso ni outcomes.
-- `transport/` conoce `@the-hive/contracts`, Fastify o Socket.IO y la API publica de `application/`; no importa operaciones internas de `domain/` ni adaptadores concretos.
-- `index.ts` puede importar todas las capas solo para construir dependencias, registrar transportes y exponer `startServer`/`stopServer`; no contiene handlers, serializacion, reglas ni scheduling operativo.
+- `transport/socket/registerRoomHandlers.ts` y `registerGameHandlers.ts` conocen parsers wire, Socket.IO y los casos de uso; solo validan, resuelven sesión activa, invocan aplicación y traducen el ack.
+- `transport/socket/roomPresenter.ts` es el único proyector de `ApplicationRoom` a envelopes de contracts: el broadcast público expone contadores y nunca mano ni `socketId`; el envelope privado se calcula solo para la identidad conectada. `socketEventPublisher.ts` publica una vez los eventos comprometidos y conserva el orden update/snapshots/log; `sessionRegistry.ts` es el único propietario de `socket.id -> playerId -> roomCode` y rechaza disconnects stale.
+- `index.ts` construye repositorio, publisher, scheduler y registros de transporte, y conserva lifecycle, HTTP y composición.
 - Los casos de uso se agrupan por familia mientras sean cohesivos. Se divide un modulo solo por variacion o tamano real; se evitan carpetas `services/`, `helpers/`, `managers/` y `utils/` sin propietario claro.
 - Los tests unitarios se colocan junto al modulo; la integracion Socket.IO vive junto al adaptador socket y los checks de limites junto a `tooling/`. Los scripts deben descubrir tests recursivamente antes de moverlos.
 - Direccion permitida: `transport -> application -> domain`; `infrastructure -> application`; `index.ts -> transport + application + infrastructure`. Cualquier otra arista entre capas requiere documentacion explicita.
+
+`application/roomUseCases.ts` recibe solamente `roomCode`, `playerId` y datos normalizados para sala y presencia. `application/gameUseCases.ts` recibe los mismos identificadores para inicio/retry/ready/pausa/jugada y usa `Clock`/`RandomSource` inyectados. `application/starUseCases.ts` recibe los cinco comandos de estrella sin sockets. `ApplicationResult` separa rechazo sin efectos de éxito con cambios/eventos/efectos. El dispatcher publica eventos ordenados después del commit y programa cada efecto por su `{ roomCode, trigger }` estable. `application/effectUseCases.ts` recibe la copia original de todos los triggers, incluido `star-settled`, exige versión esperada y deja que el dominio valide fase, lock y deadline. La espera de estrella se guarda en `ApplicationRoom` como efecto original más humanos pendientes/acknowledged: ack, desconexión y deadline usan esa misma clave y llegan al único settlement. `ProcessScheduler` reemplaza cada clave y CPU vuelve a seleccionar su carta dentro de `domain/cards.ts`, nunca en infraestructura. El publisher materializa la pausa manual en orden snapshot, `game:paused`, log; ninguna expiración o pausa automática genera ese evento. `tooling/testFiles.ts` inventaría recursivamente los tests y `tooling/layerBoundaries.ts` comprueba `application -> domain` y las importaciones prohibidas; `check:domain` sigue siendo el alias compatible de `check:layers`.
 
 ## Frontend objetivo: app y features verticales
 
@@ -129,25 +132,25 @@ apps/frontend/src/
 - Tests junto al codigo que validan helpers puros y reglas aisladas. Fuente: `apps/backend/src/*.test.ts`, `apps/frontend/src/*.test.ts`.
 - No aplica: no se observaron scripts de linting ni formateo declarados en los manifests inspeccionados. Fuente: `apps/backend/package.json`, `apps/frontend/package.json`.
 - `DomainResult` es discriminado: el rechazo solo contiene error y no se aplica; el éxito entrega estado completo, eventos y efectos declarativos. El adaptador fusiona exclusivamente estado funcional y conserva metadata de transporte.
-- El dominio no importa contracts wire, Fastify, Socket.IO, `@fastify/*`, `node:*`, shell, frontend ni infraestructura, ni usa imports dinámicos, `process`, `Date.now`, `Math.random` o timers. `npm run check:domain` lo verifica por AST en `src/domain/**` y `src/gameStateMachine.ts`.
+- El dominio no importa contracts wire, Fastify, Socket.IO, `@fastify/*`, `node:*`, shell, frontend ni infraestructura, ni usa imports dinámicos, `process`, `Date.now`, `Math.random` o timers. `npm run check:layers` lo verifica por AST en `src/domain/**` y también rechaza aristas prohibidas desde `application/`.
 - `test`, `test:coverage` y `build` ejecutan antes `check:domain`; la cobertura usa el reporter de Node para exigir >=80% de líneas, branches y funciones sobre los archivos medibles del límite lógico, excluyendo tests y módulos declarativos.
-- Los efectos de setup/ronda declaran `trigger`, `dueAt` y expectativas de fase, razon y deadline. `materializeDomainEffects()` en `index.ts` es el scheduler de `dealing-expired` y `countdown-expired`; al vencer, devuelve el efecto al dominio, que lo rechaza si las expectativas ya no coinciden.
-- `domain/cards.ts` es el único propietario de mínimo propio, bloqueantes, penalización de vida, `errorCounts`, descartes de error y outcomes de carta. `materializeCardEffects()` solo programa `error-expired`, `round-flip-expired` y `round-unflip-expired`, reaplica el resultado atómico y traduce eventos sin recalcular la regla.
-- `domain/star.ts` es el único propietario de propuesta, votos, consenso, consumo, preview, settlement y outcome de estrella. `starAnimation.ts` recibe el preview y el efecto ya decididos para esperar sockets/acks, desconexión o deadline; no calcula participantes de negocio ni muta manos, estrellas, fase o locks.
-- `domain/progression.ts` es el único propietario de recompensa, topes, avance de nivel, bloqueo de readiness, derrota y victoria; `domain/scoring.ts` es el único propietario de puntuación, bandas, mensajes, penalizaciones y orden final. El scheduler de `index.ts` solo devuelve los efectos `next-level-expired` y `level-ready-expired` al dominio y traduce sus eventos ya decididos.
+- Los efectos de setup/ronda/cartas/progresion/estrella declaran `trigger`, `dueAt` y expectativas de fase, razon y deadline. `ProcessScheduler` reemplaza trabajo por `{ roomCode, trigger }`; `effectUseCases.ts` materializa los efectos, incluido `star-settled`, con sala y versión esperadas. Al vencer, el dominio rechaza fase, lock o deadline que ya no coinciden; una versión distinta, retry o sala eliminada tampoco guarda ni publica. Los handlers solo validan wire, resuelven sesión, invocan casos de uso y traducen el ack.
+- `domain/cards.ts` es el único propietario de mínimo propio, bloqueantes, penalización de vida, `errorCounts`, descartes de error, outcomes de carta y la elección del siguiente CPU. `GameUseCases.playCard` y `EffectUseCases` solo adaptan/persisten los hechos de dominio; este último programa y reinyecta `error-expired`, `round-flip-expired`, `round-unflip-expired` y `cpu-turn` sin recalcular una regla.
+- `domain/star.ts` es el único propietario de propuesta, votos, consenso, consumo, preview, settlement y outcome de estrella. `StarUseCases` conserva solo la espera visual por identidad estable y `EffectUseCases` vuelve al settlement con el efecto decidido; transporte e infraestructura no calculan participantes de negocio ni mutan manos, estrellas, fase o locks.
+- `domain/progression.ts` es el único propietario de recompensa, topes, avance de nivel, bloqueo de readiness, derrota y victoria; `domain/scoring.ts` es el único propietario de puntuación, bandas, mensajes, penalizaciones y orden final. `EffectUseCases` devuelve `next-level-expired` y `level-ready-expired` al dominio y publica sus eventos ya decididos; `index.ts` solo compone sus dependencias.
 - Un `event-message-overlay` visible bloquea todos los controles de gameplay del frontend, incluida la carta principal, aunque la capacidad privada siga habilitada; los handlers repiten la guarda para evitar emisiones por carrera. Controles auxiliares como log o salida no forman parte de este bloqueo.
 
 # Reglas de legibilidad
 
 - Extraer reglas densas al dominio cuando no requieren acceso directo al socket o al estado global; `gameTiming.ts` conserva solo utilidades de lock y `roomSync.ts` es una proyección de UI.
-- Mantener el contrato publico/privado del estado de sala: cambios a `serializeRoom()`, `buildPrivateState()` o `createRoomSnapshot()` deben preservar que la mano completa no salga por broadcast masivo.
-- Mantener envelopes versionados y marcas de tiempo para resync del cliente. Fuente: `createPublicRoomEnvelope`, `createPrivateStateEnvelope`, `createRoomSnapshot` en `apps/backend/src/index.ts`.
-- Mantener logs y feedback acotados: el backend conserva los ultimos 50 logs y el cliente replica ese recorte. Fuente: `emitGameLog()` en `apps/backend/src/index.ts`, manejo de logs en `apps/frontend/src/App.tsx`.
+- Mantener el contrato publico/privado del estado de sala: `RoomPresenter` debe preservar que la mano completa no salga por broadcast masivo; el publisher la envía solo al socket asociado por `SessionRegistry`.
+- Mantener envelopes versionados y marcas de tiempo para resync del cliente. Fuente: `roomPresenter.ts` y `registerRoomHandlers.ts`.
+- Mantener logs y feedback acotados: `SocketEventPublisher` conserva los últimos 50 logs y el cliente replica ese recorte.
 - Incertidumbre: `apps/backend/src/index.ts` y `apps/frontend/src/App.tsx` siguen siendo archivos grandes con muchas responsabilidades; la legibilidad actual depende mas de helpers y nombres que de una separacion por features.
 
 # Patrones usados
 
-- Estado autoritativo en backend con Maps en memoria (`rooms`, `playerRoom`, `socketPlayer`) y timers por sala. Fuente: `apps/backend/src/index.ts`.
+- Estado autoritativo en backend con repositorio en memoria y scheduler por sala. Fuente: `apps/backend/src/infrastructure/`.
 - Contrato realtime basado en eventos Socket.IO con `ack` opcional `{ ok, error?, ...data }`. Fuente: handlers de `apps/backend/src/index.ts`.
 - Serializacion segura de datos privados mediante estado publico y privado separados. Fuente: `serializeRoom()`, `buildPrivateState()`, `emitRoomUpdate()` en `apps/backend/src/index.ts`.
 - Locks temporales para transiciones de dealing, countdown, error, estrella y cierre de nivel. Fuente: `apps/backend/src/gameTiming.ts`, `apps/backend/src/index.ts`, `apps/frontend/src/gameUi.ts`.
@@ -165,7 +168,7 @@ apps/frontend/src/
 
 # Maquina de estados autoritativa
 
-- `apps/backend/src/gameStateMachine.ts` es la fuente única pura para aceptar o rechazar triggers de partida. Importa vocabulario funcional desde `domain/model.ts` y recibe un snapshot mínimo, actor y reloj inyectado.
+- `apps/backend/src/domain/stateMachine.ts` es la fuente única pura para aceptar o rechazar triggers de partida. Importa vocabulario funcional desde `domain/model.ts` y recibe un snapshot mínimo, actor y reloj inyectado.
 - La API `evaluateGameTransition()` devuelve una decisión discriminada, patch de fase/lock y effects temporales declarativos; no usa Socket.IO, Maps, timers reales ni estado visual. `setup.ts` y `round.ts` la invocan antes de sus decisiones; los handlers de `index.ts` adaptan el estado en memoria, traducen resultados y programan infraestructura.
 - Los triggers incluyen entrada, ready/countdown, juego/pausa/error, consenso de estrella, cierre de ronda/nivel, terminales, retry y expiraciones. Un callback temporal debe conservar fase, motivo de lock y deadline esperados para ignorarse tras retry, reemplazo de lock o eliminación de sala.
 - `domain/participants.ts` publica políticas nombradas: ready, play, pause, consensus y settlement. No debe introducirse un predicado genérico que cambie sus poblaciones.

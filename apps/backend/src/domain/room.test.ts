@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { resolveRoomJoin, validateLobbyKickRequest, validateLobbyStartRequest } from './lobbyRules.js';
+import { resolveRoomJoin, validateLobbyKickRequest, validateLobbyStartRequest } from './room.js';
 
 test('validateLobbyStartRequest allows host start from lobby without ready state checks', () => {
   assert.deepEqual(

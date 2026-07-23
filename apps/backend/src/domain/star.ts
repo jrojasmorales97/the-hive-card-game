@@ -1,4 +1,4 @@
-import { evaluateGameTransition, type MachineState } from '../gameStateMachine.js';
+import { evaluateGameTransition, type MachineState } from './stateMachine.js';
 import type { DomainMatch, DomainStarDiscardPreview } from './model.js';
 import { consensusParticipants, settlementParticipants } from './participants.js';
 import { rejected, succeeded, type DomainEffect, type DomainEvent, type DomainResult } from './result.js';

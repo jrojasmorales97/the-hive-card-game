@@ -1,4 +1,4 @@
-import { evaluateGameTransition, type GameTrigger, type MachineState } from '../gameStateMachine.js';
+import { evaluateGameTransition, type GameTrigger, type MachineState } from './stateMachine.js';
 import type { DomainGame, DomainMatch, DomainPlayer, DomainRewardType } from './model.js';
 import { rejected, succeeded, type DomainResult } from './result.js';
 
@@ -15,7 +15,7 @@ export const GAME_BALANCE: Record<number, { maxLevel: number; lives: number }> =
 const MAX_PLAYERS = 8;
 const REWARDS: Record<number, DomainRewardType> = { 2: 'star', 3: 'life', 5: 'star', 6: 'life', 8: 'star', 9: 'life' };
 
-export type SetupInput = { now: number; deck: readonly number[]; dealingMs: number; retryBannerMs?: number };
+export type SetupInput = { now: number; deck: readonly number[] | (() => readonly number[]); dealingMs: number; retryBannerMs?: number };
 
 function copyMatch(match: DomainMatch): DomainMatch {
   return structuredClone(match);
@@ -73,7 +73,8 @@ function startOrRetry(match: DomainMatch, actorId: string, input: SetupInput, tr
   next.status = 'in-game';
   next.game = initialGame(next, input.now);
   const resetReady = trigger === 'retry';
-  next.players = dealtPlayers(next.players, input.deck, next.game.currentLevel, resetReady);
+  const deck = typeof input.deck === 'function' ? input.deck() : input.deck;
+  next.players = dealtPlayers(next.players, deck, next.game.currentLevel, resetReady);
   const dealingMs = trigger === 'retry' ? Math.max(input.dealingMs, input.retryBannerMs ?? 0) : input.dealingMs;
   const until = input.now + Math.max(0, dealingMs);
   next.game.interactionLock = { reason: 'dealing', until };

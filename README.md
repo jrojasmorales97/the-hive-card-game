@@ -2,7 +2,7 @@
 
 Juego cooperativo de cartas — todos los jugadores deben lanzar sus cartas en orden ascendente sin hablar ni darse señales, desarrollando un sentido del tiempo compartido:
 
-- `apps/backend`: Fastify + Socket.IO (estado autoritativo de sala)
+- `apps/backend`: Fastify + Socket.IO, con dominio puro y capa de aplicación para el estado autoritativo de sala
 - `apps/frontend`: React + Vite + TypeScript
 - `docker-compose.yml`: orquestación de contenedores para desarrollo
 
@@ -53,7 +53,7 @@ Servicios:
 ## Validación
 
 ```bash
-docker compose run --build --rm --no-deps backend npm run check:domain
+docker compose run --build --rm --no-deps backend npm run check:layers
 docker compose run --build --rm --no-deps backend npm test
 docker compose run --build --rm --no-deps backend npm run test:coverage
 docker compose run --build --rm --no-deps backend npm run build
@@ -62,4 +62,4 @@ docker compose run --build --rm --no-deps frontend npm run test:coverage
 docker compose run --build --rm --no-deps frontend npm run build
 ```
 
-`check:domain` verifica que las reglas puras no dependan de transporte, entorno ni timers; los comandos de test y build del backend lo ejecutan automáticamente.
+`check:layers` verifica que dominio y aplicación respeten sus límites de dependencias; `check:domain` permanece como alias compatible. Los comandos de test y build del backend lo ejecutan automáticamente.

@@ -1,4 +1,4 @@
-import { evaluateGameTransition, type GameTrigger, type MachineState } from '../gameStateMachine.js';
+import { evaluateGameTransition, type GameTrigger, type MachineState } from './stateMachine.js';
 import type { DomainMatch } from './model.js';
 import { hasAllReadyForRound, pauseParticipants } from './participants.js';
 import { rejected, succeeded, type DomainEffect, type DomainResult } from './result.js';

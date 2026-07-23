@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { expireCardEffect, playCard } from './cards.js';
+import { expireCardEffect, nextCpuCard, playCard } from './cards.js';
 import type { DomainMatch } from './model.js';
 
 const durations = { errorOverlayMs: 50, roundFlipMs: 5, roundUnflipMs: 7 };
@@ -107,4 +107,22 @@ test('the last valid card closes the round through expected flip and unflip effe
   if (!completed.ok) return;
   assert.equal(completed.state.game?.phase, 'level-complete');
   assert.deepEqual(completed.events, [{ type: 'card-outcome', outcome: 'level-complete' }]);
+});
+
+test('CPU selection is a domain decision and rejects inactive, locked, proposed, or human-lowest rounds', () => {
+  const source = match();
+  source.game!.mode = 'dev-cpu';
+  source.game!.starProposal = null;
+  source.players.alpha.hand = [4];
+  source.players.beta.hand = [2];
+  source.players.beta.isCpu = true;
+  assert.deepEqual(nextCpuCard(source), { playerId: 'beta', card: 2 });
+  source.game!.interactionLock = { reason: 'error', until: 20 };
+  assert.equal(nextCpuCard(source), null);
+  source.game!.interactionLock = null;
+  source.game!.starProposal = { initiatorId: 'alpha', acceptedBy: [] };
+  assert.equal(nextCpuCard(source), null);
+  source.game!.starProposal = null;
+  source.players.alpha.hand = [1];
+  assert.equal(nextCpuCard(source), null);
 });

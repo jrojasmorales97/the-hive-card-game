@@ -5,11 +5,11 @@ import type {
   DomainMatch,
   DomainPlayer,
   DomainStarProposal,
-} from './domain/model.js';
-import type { DomainEffect, DomainEvent, DomainResult } from './domain/result.js';
+} from '../domain/model.js';
+import type { DomainEffect, DomainEvent, DomainResult } from '../domain/result.js';
 
-type RoomPlayer = DomainPlayer & { socketId: string | null };
-type RoomGame = Omit<DomainGame, 'starProposal'> & { starProposal: { initiatorId: string; acceptedBy: Set<string> } | null };
+type RoomPlayer = DomainPlayer & { socketId?: string | null };
+type RoomGame = Omit<DomainGame, 'starProposal'> & { starProposal: { initiatorId: string; acceptedBy: string[] | Set<string> } | null };
 
 /** Minimal shell shape. Transport metadata deliberately remains outside the domain model. */
 export type AdaptableRoom = {
@@ -30,7 +30,7 @@ function copyPlayer(player: RoomPlayer): DomainPlayer {
 }
 
 function copyProposal(proposal: RoomGame['starProposal']): DomainStarProposal | null {
-  return proposal ? { initiatorId: proposal.initiatorId, acceptedBy: [...proposal.acceptedBy] } : null;
+  return proposal ? { initiatorId: proposal.initiatorId, acceptedBy: Array.from(proposal.acceptedBy) } : null;
 }
 
 function copyGame(game: RoomGame): DomainGame {
@@ -79,7 +79,7 @@ export function applyDomainResult(room: AdaptableRoom, result: DomainResult): { 
   for (const [id, player] of Object.entries(result.state.players)) {
     const current = room.players[id];
     if (!current) throw new Error(`Domain result cannot add player ${id}`);
-    nextPlayers[id] = { ...copyPlayer({ ...current, ...player }), socketId: current.socketId };
+    nextPlayers[id] = { ...copyPlayer({ ...current, ...player }), ...(current.socketId === undefined ? {} : { socketId: current.socketId }) };
   }
   if (Object.keys(nextPlayers).length !== Object.keys(room.players).length) {
     throw new Error('Domain result cannot remove players');
