@@ -672,15 +672,15 @@ Validacion:
 
 ## Estado del roadmap
 
-| Fase | Estado inicial | Prerrequisito de salida |
+| Fase | Estado actual | Prerrequisito de salida |
 | --- | --- | --- |
 | 00 Contexto del proyecto | Completada | Indice, dominio y arquitectura con ownership claro |
 | 01 Baseline | Completada | Caracterizacion Socket.IO, contexto baseline y tests Docker validados; evidencia: `.harness/implementations/2026-07-18/0.1-caracterizar-el-baseline-realtime-de-the-hive-con-tests-socket-io-y-contexto-actualizado-sin-cambiar-comportamiento-funcional-attempt-2.md` |
 | 02 Contratos | Completada | Contratos compartidos, validación runtime y privacidad verificadas; evidencia: `.harness/implementations/2026-07-18/0.2-centralizar-y-validar-los-contratos-socket-io-compartidos-de-the-hive-sin-cambiar-el-comportamiento-observable.md` |
 | 03 Estados | Completada | Maquina de estados, transiciones, locks, capacidades y Mermaid validados; evidencia: `.harness/implementations/2026-07-19/0.3-hacer-explicita-la-maquina-de-estados-de-the-hive-antes-de-extraer-el-dominio-attempt-2.md` |
 | 04 Dominio | Completada | Reglas puras sin duplicacion; evidencia: `.harness/implementations/2026-07-21/bdf87991-extraer-reglas-de-negocio-a-un-dominio-puro-task-05.md` |
-| 05 Aplicacion | Disponible | Casos de uso sin transporte |
-| 06 Infraestructura | Bloqueada por 05 | Efectos encapsulados |
+| 05 Aplicacion | Completada | Casos de uso sin transporte; evidencia: `.harness/implementations/2026-07-21/d70c49e2-capa-de-aplicacion-para-orquestar-el-dominio-sin-socketio-task-05.md` |
+| 06 Infraestructura | Disponible | Efectos encapsulados |
 | 07 Socket.IO | Bloqueada por 06 | Transporte delgado |
 | 08 Estado frontend | Bloqueada por 07 | Gateway y ownership claros |
 | 09 Features frontend | Bloqueada por 08 | Features aisladas |
