@@ -680,8 +680,8 @@ Validacion:
 | 03 Estados | Completada | Maquina de estados, transiciones, locks, capacidades y Mermaid validados; evidencia: `.harness/implementations/2026-07-19/0.3-hacer-explicita-la-maquina-de-estados-de-the-hive-antes-de-extraer-el-dominio-attempt-2.md` |
 | 04 Dominio | Completada | Reglas puras sin duplicacion; evidencia: `.harness/implementations/2026-07-21/bdf87991-extraer-reglas-de-negocio-a-un-dominio-puro-task-05.md` |
 | 05 Aplicacion | Completada | Casos de uso sin transporte; evidencia: `.harness/implementations/2026-07-21/d70c49e2-capa-de-aplicacion-para-orquestar-el-dominio-sin-socketio-task-05.md` |
-| 06 Infraestructura | Disponible | Efectos encapsulados |
-| 07 Socket.IO | Bloqueada por 06 | Transporte delgado |
+| 06 Infraestructura | Completada | Puertos, adaptadores deterministas, ownership de efectos y cleanup verificados; evidencia: `.harness/implementations/2026-07-23/c4e8a1f2-encapsular-infraestructura-backend-detras-de-puertos-manteniendo-comportamiento-in-memory-task-02.md` |
+| 07 Socket.IO | Disponible | Transporte delgado |
 | 08 Estado frontend | Bloqueada por 07 | Gateway y ownership claros |
 | 09 Features frontend | Bloqueada por 08 | Features aisladas |
 | 10 Hardening | Bloqueada por 09 | Contexto consistente, enforcement local y legacy eliminado |
