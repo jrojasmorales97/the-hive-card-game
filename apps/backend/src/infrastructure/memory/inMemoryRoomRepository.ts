@@ -18,13 +18,20 @@ export class InMemoryRoomRepository implements RoomRepository {
     const current = this.rooms.get(room.code);
     if (current && current.version !== expectedVersion) throw new Error('Room version conflict');
     const next = clone({ ...room, version: current ? current.version + 1 : room.version });
+    if (current) {
+      for (const playerId of Object.keys(current.players)) {
+        if (this.playerRooms.get(playerId) === current.code) this.playerRooms.delete(playerId);
+      }
+    }
     this.rooms.set(next.code, next);
     for (const playerId of Object.keys(next.players)) this.playerRooms.set(playerId, next.code);
     return clone(next);
   }
   delete(roomCode: string): void {
     const room = this.rooms.get(roomCode);
-    if (room) for (const playerId of Object.keys(room.players)) this.playerRooms.delete(playerId);
+    if (room) for (const playerId of Object.keys(room.players)) {
+      if (this.playerRooms.get(playerId) === roomCode) this.playerRooms.delete(playerId);
+    }
     this.rooms.delete(roomCode);
   }
 }

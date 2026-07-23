@@ -65,7 +65,7 @@ export function buildPrivateActions(ctx: PrivateActionContext): PrivateAction[] 
       'round_out_wait',
       roundOutWaitVisible,
       false,
-      roundOutWaitVisible ? 'The hive is resolving the round without your swarm' : undefined,
+      roundOutWaitVisible ? 'Waiting for others' : undefined,
     ),
     action(
       'start',

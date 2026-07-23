@@ -43,6 +43,7 @@ function createFixture() {
     schedule: (roomCode: string, key: string, effect: ApplicationEffect) => scheduled.set(`${roomCode}:${key}`, effect),
     cancel: (roomCode: string, key: string) => scheduled.delete(`${roomCode}:${key}`),
     cancelRoom: (roomCode: string) => { for (const key of scheduled.keys()) if (key.startsWith(`${roomCode}:`)) scheduled.delete(key); },
+    cancelAll: () => scheduled.clear(),
   };
   const dependencies = {
     rooms,

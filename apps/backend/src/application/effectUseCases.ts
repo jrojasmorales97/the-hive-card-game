@@ -51,7 +51,7 @@ export class EffectUseCases {
       if (!cpu) return applicationRejected('invalid-state', 'Stale timed transition');
       const played = executePlayCard(this.gameDependencies(), { roomCode: room.code, playerId: cpu.playerId, card: cpu.card });
       if (!played.ok) return played;
-      return applicationSucceeded({ roomCode: room.code }, played.changes, played.events, played.effects);
+      return { ...played, data: { roomCode: room.code } };
     }
 
     const resolved = this.resolveDomainEffect(room.code, actor.id, effect);
@@ -91,11 +91,26 @@ export class EffectUseCases {
     if (!allAcknowledged && now < wait.effect.dueAt) return applicationRejected('invalid-state', 'Stale timed transition');
 
     const expectedVersion = room.version;
-    const resolved = settleStar(toDomainMatch(room), room.hostId, wait.effect, {
+    let resolved = settleStar(toDomainMatch(room), room.hostId, wait.effect, {
       now,
       roundFlipMs: this.dependencies.cardDurations().roundFlipMs,
     });
     if (!resolved.ok) return applicationRejected('invalid-state', resolved.error);
+    const outcome = resolved.events.find((event) => event.type === 'star-outcome');
+    if (outcome?.outcome === 'pause') {
+      const participant = readyParticipants({ players: Object.values(resolved.state.players) })[0];
+      if (!participant) return applicationRejected('invalid-state', 'Invalid game state');
+      const continued = setRoundReady(resolved.state, participant.id, participant.ready, {
+        now,
+        countdownMs: this.dependencies.countdownMs,
+      });
+      if (!continued.ok) return applicationRejected('invalid-state', continued.error);
+      resolved = accepted(
+        continued.state,
+        [...resolved.events, ...continued.events],
+        [...resolved.effects, ...continued.effects],
+      );
+    }
     const applied = applyDomainResult(room, resolved);
     if (!applied.applied) return applicationRejected('invalid-state', 'Invalid game state');
     room.starSettlement = null;

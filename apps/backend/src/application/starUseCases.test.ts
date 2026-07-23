@@ -37,6 +37,7 @@ function fixture() {
       schedule: (roomCode: string, key: string, effect: ApplicationEffect) => scheduled.set(`${roomCode}:${key}`, effect),
       cancel: (roomCode: string, key: string) => scheduled.delete(`${roomCode}:${key}`),
       cancelRoom: (roomCode: string) => { for (const key of scheduled.keys()) if (key.startsWith(`${roomCode}:`)) scheduled.delete(key); },
+      cancelAll: () => scheduled.clear(),
     },
     clock: { now: () => now },
   };
@@ -65,7 +66,9 @@ test('star proposal preserves consensus and settlement populations without touch
   assert.deepEqual(proposed.players.host.hand, [2]);
   assert.equal(state.stars.acceptStar({ roomCode: source.code, playerId: 'host' }).ok, true, 'repeated vote is a no-op');
   assert.equal(state.stars.acceptStar({ roomCode: source.code, playerId: 'guest' }).ok, true);
-  assert.equal(state.stars.acceptStar({ roomCode: source.code, playerId: 'empty' }).ok, true);
+  const consensus = state.stars.acceptStar({ roomCode: source.code, playerId: 'empty' });
+  assert.equal(consensus.ok, true);
+  if (consensus.ok) assert.deepEqual(consensus.directives.map((directive) => directive.type), ['cancel', 'replace']);
 
   const resolving = state.rooms.get(source.code)!;
   assert.equal(resolving.game?.stars, 0);
@@ -109,6 +112,31 @@ test('acknowledgements, disconnect-equivalent completion and deadline converge o
   assert.equal(timeout.rooms.get('STAR01')?.players.cpu.hand.length, 0);
 });
 
+test('settlement auto-readies remaining CPUs when the human finishes their hand', () => {
+  const state = fixture();
+  const source = playingRoom();
+  source.players = {
+    host: { id: 'host', name: 'Host', connected: true, ready: false, hand: [2] },
+    cpu: { id: 'cpu', name: 'CPU 1', connected: true, ready: false, hand: [1, 6], isCpu: true },
+    cpu2: { id: 'cpu2', name: 'CPU 2', connected: true, ready: false, hand: [3, 7], isCpu: true },
+  };
+  state.rooms.save(source, 0);
+
+  assert.equal(state.stars.proposeStar({ roomCode: 'STAR01', playerId: 'host' }).ok, true);
+  assert.equal(state.stars.completeStarAnimation({ roomCode: 'STAR01', playerId: 'host' }).ok, true);
+  assert.equal(state.effects.materialize(state.scheduled.get('STAR01:star-settled')!).ok, true);
+
+  const settled = state.rooms.get('STAR01')!;
+  assert.deepEqual(settled.players.host.hand, []);
+  assert.deepEqual(settled.players.cpu.hand, [6]);
+  assert.deepEqual(settled.players.cpu2.hand, [7]);
+  assert.equal(settled.players.cpu.ready, true);
+  assert.equal(settled.players.cpu2.ready, true);
+  assert.equal(settled.game?.phase, 'paused');
+  assert.equal(settled.game?.interactionLock?.reason, 'countdown');
+  assert.ok(state.scheduled.has('STAR01:countdown-expired'));
+});
+
 test('cancel and reject only clear the proposal, dispatch a room update, and can resume a CPU turn', () => {
   const state = fixture();
   state.rooms.save(playingRoom(), 0);
@@ -135,6 +163,7 @@ test('an active disconnect closes only that visual wait and settlement still use
       schedule: (roomCode, key, effect) => state.scheduled.set(`${roomCode}:${key}`, effect),
       cancel: (roomCode, key) => state.scheduled.delete(`${roomCode}:${key}`),
       cancelRoom: () => undefined,
+      cancelAll: () => state.scheduled.clear(),
     },
     random: { next: () => 0 },
   });

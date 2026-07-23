@@ -11,6 +11,7 @@
 - Leer cuando: vayas a cambiar stack, comandos, estructura de carpetas, contratos Socket.IO, la máquina de estados autoritativa, patrones backend/frontend, dependencias o workflow de despliegue observados en `docker-compose.yml`, `render.yaml`, `apps/backend/` y `apps/frontend/`.
 - Contratos Socket.IO: `packages/contracts/`; consultar antes de modificar payloads, snapshots, acks o eventos realtime.
 - Capas backend: consulta el mapa de casos de uso, permisos y poblaciones en `.harness/context/domain.md`; `apps/backend/src/application/` orquesta `apps/backend/src/domain/`.
+- Puertos backend: revisa `apps/backend/src/application/ports/`; sus implementaciones in-memory, runtime y scheduling viven respectivamente en `apps/backend/src/infrastructure/memory/`, `runtime/` y `scheduling/`. Ejecuta `npm run check:layers` en `apps/backend` antes de test, cobertura o build.
 
 ## Artefactos SDD
 

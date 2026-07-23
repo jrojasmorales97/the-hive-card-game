@@ -101,7 +101,7 @@ test('buildPrivateActions hides ready toggles and exposes round-out feedback dur
     type: 'round_out_wait',
     visible: true,
     enabled: false,
-    reason: 'The hive is resolving the round without your swarm',
+    reason: 'Waiting for others',
   });
 });
 

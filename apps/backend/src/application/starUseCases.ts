@@ -108,7 +108,6 @@ export class StarUseCases {
       const original = applied.effects.find((effect) => effect.trigger === 'star-settled');
       if (!original) return applicationRejected('invalid-state', 'Invalid game state');
       room.starSettlement = this.waitFor(room, used.discarded, original);
-      this.dependencies.scheduler.cancel(room.code, 'cpu-turn');
     }
     const saved = this.dependencies.rooms.save(room, expectedVersion);
     const events = starEvents(saved.code, applied.events);
@@ -123,7 +122,13 @@ export class StarUseCases {
       if ((action === 'cancel' || action === 'reject') && nextCpuCard(toDomainMatch(saved))) effects.push(this.cpuEffect(saved));
     }
     return dispatchApplicationResult(
-      applicationSucceeded({ room: saved }, [{ type: 'room-saved', room: saved, expectedVersion }], events, effects),
+      applicationSucceeded(
+        { room: saved },
+        [{ type: 'room-saved', room: saved, expectedVersion }],
+        events,
+        effects,
+        used ? [{ type: 'cancel', roomCode: saved.code, trigger: 'cpu-turn' }] : [],
+      ),
       this.dependencies.publisher,
       this.dependencies.scheduler,
     );

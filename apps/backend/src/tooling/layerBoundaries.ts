@@ -3,11 +3,14 @@ import { join, relative, resolve } from 'node:path';
 import ts from 'typescript';
 
 export type BoundaryIssue = { file: string; line: number; message: string };
-type Layer = 'domain' | 'application' | 'other';
+type Layer = 'domain' | 'application' | 'infrastructure' | 'transport' | 'other';
 
 function layer(file: string): Layer {
-  return file.replaceAll('\\', '/').includes('/domain/') || file.startsWith('domain/') ? 'domain'
-    : file.replaceAll('\\', '/').includes('/application/') || file.startsWith('application/') ? 'application' : 'other';
+  const normalized = file.replaceAll('\\', '/');
+  return normalized.includes('/domain/') || normalized.startsWith('domain/') ? 'domain'
+    : normalized.includes('/application/') || normalized.startsWith('application/') ? 'application'
+      : normalized.includes('/infrastructure/') || normalized.startsWith('infrastructure/') ? 'infrastructure'
+        : normalized.includes('/transport/') || normalized.startsWith('transport/') ? 'transport' : 'other';
 }
 
 function issue(source: ts.SourceFile, node: ts.Node, message: string): BoundaryIssue {
@@ -22,10 +25,12 @@ function forbidden(current: Layer, specifier: string): string | null {
   if (current === 'application') {
     if (/^(fastify|socket\.io|@fastify\/|node:|@the-hive\/contracts)/.test(specifier) || /(?:infrastructure|transport|index\.)/.test(specifier)) return `Forbidden application import: ${specifier}`;
   }
+  if (current === 'infrastructure' && /(?:transport|index\.)/.test(specifier)) return `Forbidden infrastructure import: ${specifier}`;
+  if (current === 'transport' && /(?:infrastructure|index\.)/.test(specifier)) return `Forbidden transport import: ${specifier}`;
   return null;
 }
 
-/** AST checker for static and dynamic imports; application may depend only on application/domain. */
+/** AST checker for static and dynamic imports across domain, application, infrastructure, and transport. */
 export function inspectLayerSource(fileName: string, text: string): BoundaryIssue[] {
   const source = ts.createSourceFile(fileName, text, ts.ScriptTarget.ES2022, true);
   // Standalone fixtures use a bare filename and model the stricter domain boundary.
@@ -41,8 +46,8 @@ export function inspectLayerSource(fileName: string, text: string): BoundaryIssu
       if (!node.arguments[0] || !ts.isStringLiteral(node.arguments[0])) issues.push(issue(source, node, 'Dynamic imports must use a literal'));
       else check(node, node.arguments[0].text);
     }
-    if (current === 'domain' && ts.isIdentifier(node) && ['process', 'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'].includes(node.text)) issues.push(issue(source, node, `Forbidden domain global: ${node.text}`));
-    if (current === 'domain' && ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression) && ['Date.now', 'Math.random'].includes(`${node.expression.text}.${node.name.text}`)) issues.push(issue(source, node, `Forbidden domain global: ${node.expression.text}.${node.name.text}`));
+    if ((current === 'domain' || current === 'application') && ts.isIdentifier(node) && ['process', 'setTimeout', 'setInterval', 'setImmediate', 'clearTimeout', 'clearInterval', 'clearImmediate'].includes(node.text)) issues.push(issue(source, node, `Forbidden ${current} global: ${node.text}`));
+    if ((current === 'domain' || current === 'application') && ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression) && ['Date.now', 'Math.random'].includes(`${node.expression.text}.${node.name.text}`)) issues.push(issue(source, node, `Forbidden ${current} global: ${node.expression.text}.${node.name.text}`));
     ts.forEachChild(node, visit);
   };
   visit(source);

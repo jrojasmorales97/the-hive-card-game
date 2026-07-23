@@ -4,12 +4,13 @@ import { isInteractionLockActive } from '../../gameTiming.js';
 import { playParticipants, readyParticipants } from '../../domain/participants.js';
 import type { MachineState } from '../../domain/stateMachine.js';
 import type { ApplicationPlayer, ApplicationRoom } from '../../application/model.js';
+import type { Clock } from '../../application/ports/clock.js';
 
 type RuntimeRoom = ApplicationRoom & { game: (ApplicationRoom['game'] & { starProposal?: { initiatorId: string; acceptedBy: string[] | Set<string> } | null }) | null };
 
 /** The only adapter that combines application room state with Socket.IO wire envelopes. */
 export class RoomPresenter {
-  constructor(private readonly now: () => number) {}
+  constructor(private readonly clock: Clock) {}
 
   publicState(room: RuntimeRoom): PublicRoomState {
     return {
@@ -37,7 +38,7 @@ export class RoomPresenter {
     };
   }
 
-  privateState(room: RuntimeRoom, player: ApplicationPlayer): PrivatePlayerState {
+  privateState(room: RuntimeRoom, player: ApplicationPlayer, now = this.clock.now()): PrivatePlayerState {
     const game = room.game;
     const machineState: MachineState = {
       roomStatus: room.status,
@@ -52,7 +53,7 @@ export class RoomPresenter {
       actorId: player.id,
       players: Object.values(room.players).map((entry) => ({ id: entry.id, connected: entry.connected, ready: entry.ready, hand: [...entry.hand], isCpu: entry.isCpu })),
     };
-    const interactionLocked = Boolean(game && isInteractionLockActive(game.interactionLock));
+    const interactionLocked = Boolean(game && isInteractionLockActive(game.interactionLock, now));
     return {
       hand: [...player.hand].sort((a, b) => a - b),
       availableActions: buildPrivateActions({
@@ -67,12 +68,12 @@ export class RoomPresenter {
         isActiveRoundParticipant: playParticipants({ players: Object.values(room.players) }).some((entry) => entry.id === player.id),
         canParticipateInStarConsensus: player.connected, inRoundReadyWindow: Boolean(game && (game.phase === 'focus' || game.phase === 'paused')),
         canRetry: Boolean(game && (game.phase === 'victory' || game.phase === 'game-over') && room.hostId === player.id),
-        machineState, now: this.now(),
+        machineState, now,
       }),
     };
   }
 
-  publicEnvelope(room: RuntimeRoom, serverTime = this.now()): PublicRoomEnvelope { return { version: room.version, serverTime, publicState: this.publicState(room) }; }
-  privateEnvelope(room: RuntimeRoom, player: ApplicationPlayer, serverTime = this.now()): PrivatePlayerEnvelope { return { version: room.version, serverTime, privateState: this.privateState(room, player) }; }
-  snapshot(room: RuntimeRoom, player: ApplicationPlayer, serverTime = this.now()): RoomSnapshot { return { version: room.version, serverTime, publicState: this.publicState(room), privateState: this.privateState(room, player) }; }
+  publicEnvelope(room: RuntimeRoom, serverTime = this.clock.now()): PublicRoomEnvelope { return { version: room.version, serverTime, publicState: this.publicState(room) }; }
+  privateEnvelope(room: RuntimeRoom, player: ApplicationPlayer, serverTime = this.clock.now()): PrivatePlayerEnvelope { return { version: room.version, serverTime, privateState: this.privateState(room, player, serverTime) }; }
+  snapshot(room: RuntimeRoom, player: ApplicationPlayer, serverTime = this.clock.now()): RoomSnapshot { return { version: room.version, serverTime, publicState: this.publicState(room), privateState: this.privateState(room, player, serverTime) }; }
 }

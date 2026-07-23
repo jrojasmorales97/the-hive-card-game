@@ -3,6 +3,7 @@ import { parseIdentityPayload, parseJoinRoomPayload, parseKickPayload } from '@t
 import type { Server } from 'socket.io';
 import type { RoomUseCases } from '../../application/roomUseCases.js';
 import type { ApplicationRoom } from '../../application/model.js';
+import type { Clock } from '../../application/ports/clock.js';
 import { RoomPresenter } from './roomPresenter.js';
 import { SessionRegistry } from './sessionRegistry.js';
 
@@ -14,6 +15,7 @@ export type RegisterRoomHandlersDependencies = {
   useCases: RoomUseCases;
   sessions: SessionRegistry;
   presenter: RoomPresenter;
+  clock: Clock;
   getRoom: (roomCode: string) => ApplicationRoom | undefined;
   findRoomCodeByPlayer: (playerId: string) => string | undefined;
   resolveJoinRoom: (requestedRoomCode: string, playerId: string) => { roomCode: string } | { error: string };
@@ -97,7 +99,7 @@ export function registerRoomHandlers(dependencies: RegisterRoomHandlersDependenc
       if (!current) return ack?.({ ok: false, error: 'You are not in a room' });
       const result = dependencies.useCases.resyncRoom(current);
       if (!result.ok) return ack?.({ ok: false, error: result.error.message });
-      const serverTime = Date.now();
+      const serverTime = dependencies.clock.now();
       return ack?.({ ok: true, snapshot: dependencies.presenter.snapshot(result.data.room, result.data.player, serverTime), room: dependencies.presenter.publicState(result.data.room), hand: [...result.data.player.hand].sort((a, b) => a - b), syncedAt: serverTime });
     });
 

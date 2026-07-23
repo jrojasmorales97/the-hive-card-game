@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { InMemoryRoomRepository } from '../infrastructure/memory/inMemoryRoomRepository.js';
+import { SequenceRandomSource } from '../infrastructure/runtime/sequenceRandomSource.js';
 import { RoomUseCases } from './roomUseCases.js';
 import type { ApplicationEvent } from './result.js';
 
@@ -8,7 +9,7 @@ function fixture() {
   const events: ApplicationEvent[] = [];
   const scheduled: string[] = [];
   const rooms = new InMemoryRoomRepository();
-  const useCases = new RoomUseCases({ rooms, publisher: { publish: (event) => events.push(event) }, scheduler: { schedule: (_room, key) => scheduled.push(key), cancel: () => undefined, cancelRoom: () => undefined }, random: { next: () => 0 } });
+  const useCases = new RoomUseCases({ rooms, publisher: { publish: (event) => events.push(event) }, scheduler: { schedule: (_room, key) => scheduled.push(key), cancel: () => undefined, cancelRoom: () => undefined, cancelAll: () => undefined }, random: { next: () => 0 } });
   return { useCases, rooms, events, scheduled };
 }
 
@@ -26,6 +27,22 @@ test('room use cases commit once before publishing ordered room events', () => {
   assert.equal(events.at(-1)?.type, 'room-joined');
 });
 
+test('room codes consume the configured random source in stable order', () => {
+  const events: ApplicationEvent[] = [];
+  const random = new SequenceRandomSource([0, 0.5, 0.999, 0.25, 0.75, 0.125]);
+  const useCases = new RoomUseCases({
+    rooms: new InMemoryRoomRepository(), publisher: { publish: (event) => events.push(event) },
+    scheduler: { schedule: () => undefined, cancel: () => undefined, cancelRoom: () => undefined, cancelAll: () => undefined }, random,
+  });
+
+  const created = useCases.createRoom({ playerId: 'host-0001', playerName: 'Host' });
+
+  assert.equal(created.ok, true);
+  if (created.ok) assert.equal(created.data.room.code, 'AS9J2E');
+  assert.equal(random.reads, 6);
+  assert.deepEqual(events.map((event) => event.type), ['room-joined']);
+});
+
 test('room use cases preserve reconnection, host migration and empty-room cleanup', () => {
   const { useCases, rooms } = fixture();
   const created = useCases.createRoom({ playerId: 'host-0001', playerName: 'Host' });
@@ -37,7 +54,10 @@ test('room use cases preserve reconnection, host migration and empty-room cleanu
   assert.equal(useCases.leaveRoom({ roomCode: code, playerId: 'host-0001' }).ok, true);
   assert.equal(rooms.get(code)?.hostId, 'guest-001');
   const deleted = useCases.leaveRoom({ roomCode: code, playerId: 'guest-001' });
-  assert.equal(deleted.ok, true); if (deleted.ok) assert.equal(deleted.data.deleted, true);
+  assert.equal(deleted.ok, true); if (deleted.ok) {
+    assert.equal(deleted.data.deleted, true);
+    assert.deepEqual(deleted.directives, [{ type: 'cancel-room', roomCode: code }]);
+  }
   assert.equal(rooms.get(code), undefined);
 });
 

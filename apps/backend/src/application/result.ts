@@ -32,10 +32,26 @@ export type ApplicationEvent =
 
 /** Effects retain their room identity so replacement and stale validation never cross aggregates. */
 export type ApplicationEffect = DomainEffect & { roomCode: string; expectedVersion: number };
+export type ApplicationWorkDirective =
+  | { type: 'replace'; effect: ApplicationEffect }
+  | { type: 'cancel'; roomCode: string; trigger: ApplicationEffect['trigger'] }
+  | { type: 'cancel-room'; roomCode: string };
 
 export type ApplicationResult<T> =
   | { ok: false; error: ApplicationError }
-  | { ok: true; data: T; changes: ApplicationChange[]; events: ApplicationEvent[]; effects: ApplicationEffect[] };
+  | { ok: true; data: T; changes: ApplicationChange[]; events: ApplicationEvent[]; directives: ApplicationWorkDirective[] };
 
 export const applicationRejected = (code: ApplicationErrorCode, message: string): ApplicationResult<never> => ({ ok: false, error: { code, message } });
-export const applicationSucceeded = <T>(data: T, changes: ApplicationChange[] = [], events: ApplicationEvent[] = [], effects: ApplicationEffect[] = []): ApplicationResult<T> => ({ ok: true, data, changes, events, effects });
+export const applicationSucceeded = <T>(
+  data: T,
+  changes: ApplicationChange[] = [],
+  events: ApplicationEvent[] = [],
+  replacements: ApplicationEffect[] = [],
+  directives: ApplicationWorkDirective[] = [],
+): ApplicationResult<T> => ({
+  ok: true,
+  data,
+  changes,
+  events,
+  directives: [...directives, ...replacements.map((effect) => ({ type: 'replace' as const, effect }))],
+});

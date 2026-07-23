@@ -22,8 +22,12 @@ import { EffectUseCases } from './application/effectUseCases.js';
 import { StarUseCases } from './application/starUseCases.js';
 import type { ApplicationRoom } from './application/model.js';
 import type { Scheduler } from './application/ports/scheduler.js';
+import type { Clock } from './application/ports/clock.js';
+import type { RandomSource } from './application/ports/randomSource.js';
 import { ProcessScheduler } from './infrastructure/scheduling/processScheduler.js';
 import { InMemoryRoomRepository } from './infrastructure/memory/inMemoryRoomRepository.js';
+import { SystemClock } from './infrastructure/runtime/systemClock.js';
+import { SystemRandomSource } from './infrastructure/runtime/systemRandomSource.js';
 import { SessionRegistry } from './transport/socket/sessionRegistry.js';
 import { RoomPresenter } from './transport/socket/roomPresenter.js';
 import { SocketEventPublisher } from './transport/socket/socketEventPublisher.js';
@@ -83,7 +87,8 @@ type Room = {
 
 const roomRepository = new InMemoryRoomRepository();
 const sessions = new SessionRegistry();
-let random = Math.random;
+let clock: Clock = new SystemClock();
+let randomSource: RandomSource = new SystemRandomSource();
 let timingScale = 1;
 let listening = false;
 
@@ -107,6 +112,7 @@ let starUseCases: StarUseCases;
 let roomPresenter: RoomPresenter;
 let socketEventPublisher: SocketEventPublisher;
 let applicationScheduler: Scheduler;
+let processScheduler: ProcessScheduler | undefined;
 
 async function createTransport(): Promise<void> {
   app = Fastify({ logger: true });
@@ -122,32 +128,33 @@ async function createTransport(): Promise<void> {
       credentials: !ALLOW_ALL_ORIGINS,
     },
   });
-  roomPresenter = new RoomPresenter(() => Date.now());
+  roomPresenter = new RoomPresenter(clock);
   socketEventPublisher = new SocketEventPublisher(
     io,
     (code) => roomRepository.current(code) as unknown as ApplicationRoom & { logs: GameLogEvent[] } | undefined,
     sessions,
     roomPresenter,
-    () => Date.now(),
+    clock,
   );
-  const processScheduler = new ProcessScheduler((effect) => { effectUseCases.materialize(effect); }, () => Date.now());
+  processScheduler = new ProcessScheduler((effect) => { effectUseCases.materialize(effect); }, clock);
   applicationScheduler = {
-    schedule: (roomCode, key, effect) => processScheduler.schedule(roomCode, key, effect),
-    cancel: (roomCode, key) => processScheduler.cancel(roomCode, key),
-    cancelRoom: (roomCode) => { processScheduler.cancelRoom(roomCode); clearRoomTimers(roomCode); },
+    schedule: (roomCode, key, effect) => processScheduler!.schedule(roomCode, key, effect),
+    cancel: (roomCode, key) => processScheduler!.cancel(roomCode, key),
+    cancelRoom: (roomCode) => processScheduler!.cancelRoom(roomCode),
+    cancelAll: () => processScheduler!.cancelAll(),
   };
   roomUseCases = new RoomUseCases({
     rooms: roomRepository,
     publisher: socketEventPublisher,
     scheduler: applicationScheduler,
-    random: { next: () => random() },
+    random: randomSource,
   });
   gameUseCases = new GameUseCases({
     rooms: roomRepository,
     publisher: socketEventPublisher,
     scheduler: applicationScheduler,
-    clock: { now: () => Date.now() },
-    random: { next: () => random() },
+    clock,
+    random: randomSource,
     dealingDuration: (level) => scaledDuration(getDealLockDuration(level)),
     countdownDuration: () => scaledDuration(ROUND_COUNTDOWN_DELAY_MS),
     retryBannerMs: scaledDuration(RESTART_BANNER_DELAY_MS),
@@ -158,9 +165,9 @@ async function createTransport(): Promise<void> {
     rooms: roomRepository,
     publisher: socketEventPublisher,
     scheduler: applicationScheduler,
-    clock: { now: () => Date.now() },
+    clock,
     countdownMs: scaledDuration(ROUND_COUNTDOWN_DELAY_MS),
-    random: { next: () => random() },
+    random: randomSource,
     cardDurations: () => ({ errorOverlayMs: scaledDuration(ERROR_LOCK_MS), roundFlipMs: scaledDuration(ROUND_OUT_FLIP_MS), roundUnflipMs: scaledDuration(ROUND_OUT_UNFLIP_MS) }),
     levelCompleteMs: () => scaledDuration(LEVEL_COMPLETE_LOCK_MS),
     dealingDuration: (level) => scaledDuration(getDealLockDuration(level)),
@@ -171,7 +178,7 @@ async function createTransport(): Promise<void> {
     rooms: roomRepository,
     publisher: socketEventPublisher,
     scheduler: applicationScheduler,
-    clock: { now: () => Date.now() },
+    clock,
     resolutionMs: () => scaledDuration(5000),
     roundFlipMs: () => scaledDuration(ROUND_OUT_FLIP_MS),
     cpuDelay: () => scaledDuration(DEV_CPU_PLAY_DELAY_MS),
@@ -188,6 +195,7 @@ async function createTransport(): Promise<void> {
     useCases: roomUseCases,
     sessions,
     presenter: roomPresenter,
+    clock,
     getRoom: (code) => roomRepository.get(code),
     findRoomCodeByPlayer: (playerId) => roomRepository.findRoomCodeByPlayer(playerId),
     resolveJoinRoom: (requestedRoomCode, playerId) => resolveJoinRoom(requestedRoomCode, playerId),
@@ -200,7 +208,7 @@ function generateRoomCode(length = 6): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code = '';
   for (let i = 0; i < length; i++) {
-    code += chars[Math.floor(random() * chars.length)];
+    code += chars[Math.floor(randomSource.next() * chars.length)];
   }
   return code;
 }
@@ -218,10 +226,6 @@ function createUniqueRoomCode(): string {
 
 function scaledDuration(durationMs: number): number {
   return Math.max(0, durationMs * timingScale);
-}
-
-function clearRoomTimers(roomCode: string): void {
-  void roomCode;
 }
 
 function isValidPlayerId(playerId: string): boolean {
@@ -293,8 +297,9 @@ export async function startServer(options: ServerStartOptions = {}): Promise<{ u
     throw new Error('Server is already starting');
   }
 
+  clock = new SystemClock();
+  randomSource = new SystemRandomSource(options.random);
   if (!app) await createTransport();
-  random = options.random ?? Math.random;
   timingScale = Number.isFinite(options.timingScale) ? Math.max(0, options.timingScale!) : 1;
   const host = options.host ?? '0.0.0.0';
   await app.listen({ port: options.port ?? PORT, host });
@@ -305,7 +310,7 @@ export async function startServer(options: ServerStartOptions = {}): Promise<{ u
 }
 
 export function resetServerForTests(): void {
-  for (const roomCode of roomRepository.roomCodes()) applicationScheduler?.cancelRoom(roomCode);
+  applicationScheduler?.cancelAll();
   roomRepository.clear();
   sessions.clear();
 }
@@ -315,7 +320,9 @@ export async function stopServer(): Promise<void> {
   if (listening) await io.close();
   listening = false;
   app = undefined as unknown as ReturnType<typeof Fastify>;
-  random = Math.random;
+  processScheduler = undefined;
+  clock = new SystemClock();
+  randomSource = new SystemRandomSource();
   timingScale = 1;
 }
 

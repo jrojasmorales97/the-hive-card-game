@@ -106,8 +106,14 @@ export class RoomUseCases {
     const next = copy(room);
     delete next.players[player.id];
     if (Object.keys(next.players).length === 0) {
-      this.dependencies.rooms.delete(room.code); this.dependencies.scheduler.cancelRoom(room.code);
-      return this.complete(applicationSucceeded({ deleted: true, room: null }, [{ type: 'room-deleted', roomCode: room.code }], [...leadingEvents, { type: 'room-left', roomCode: room.code, playerId: player.id, playerName: player.name }]));
+      this.dependencies.rooms.delete(room.code);
+      return this.complete(applicationSucceeded(
+        { deleted: true, room: null },
+        [{ type: 'room-deleted', roomCode: room.code }],
+        [...leadingEvents, { type: 'room-left', roomCode: room.code, playerId: player.id, playerName: player.name }],
+        [],
+        [{ type: 'cancel-room', roomCode: room.code }],
+      ));
     }
     if (Object.values(next.players).every((entry) => entry.isCpu)) {
       next.status = 'lobby';

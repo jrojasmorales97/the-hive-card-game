@@ -77,19 +77,6 @@ export class GameUseCases {
     return executePlayCard(this.dependencies, command);
   }
 
-  /** Queues a CPU turn only when the domain identifies a currently eligible CPU. */
-  scheduleCpuTurn(roomCode: string): void {
-    const room = this.dependencies.rooms.get(roomCode);
-    if (!room || !nextCpuCard(toDomainMatch(room))) return;
-    const game = room.game!;
-    const effect: ApplicationEffect = {
-      type: 'schedule', trigger: 'cpu-turn', dueAt: this.dependencies.clock.now() + Math.max(0, this.dependencies.cpuDelay()),
-      expected: { phase: game.phase, lockReason: game.interactionLock?.reason ?? null, lockUntil: game.interactionLock?.until ?? null },
-      roomCode, expectedVersion: room.version,
-    };
-    this.dependencies.scheduler.schedule(roomCode, effect.trigger, effect);
-  }
-
   /** Commits the domain's ready decision and lets the dispatcher replace countdown work by key. */
   setPlayerReady(command: GameCommand & { ready: boolean }): ApplicationResult<{ room: ApplicationRoom }> {
     const room = this.dependencies.rooms.get(command.roomCode);
@@ -173,6 +160,7 @@ export class GameUseCases {
         [{ type: 'room-saved', room: saved, expectedVersion: room.version }],
         [event],
         effects,
+        action === 'retry' ? [{ type: 'cancel-room', roomCode: saved.code }] : [],
       ),
       this.dependencies.publisher,
       this.dependencies.scheduler,

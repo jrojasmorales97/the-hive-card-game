@@ -17,7 +17,8 @@ test('socket publisher materializes one committed room event once in public and 
   };
   const sessions = new SessionRegistry();
   sessions.bind('socket-host', 'host', room.code);
-  const publisher = new SocketEventPublisher(io, (code) => code === room.code ? room as never : undefined, sessions, new RoomPresenter(() => 100), () => 100);
+  const clock = { now: () => 100 };
+  const publisher = new SocketEventPublisher(io, (code) => code === room.code ? room as never : undefined, sessions, new RoomPresenter(clock), clock);
 
   publisher.publish({ type: 'room-joined', roomCode: room.code, playerId: 'host', playerName: 'Host' });
 
@@ -40,7 +41,8 @@ test('manual pause publishes snapshot, pause notification, and log in wire order
   };
   const sessions = new SessionRegistry();
   sessions.bind('socket-host', 'host', room.code);
-  const publisher = new SocketEventPublisher(io, (code) => code === room.code ? room as never : undefined, sessions, new RoomPresenter(() => 100), () => 100);
+  const clock = { now: () => 100 };
+  const publisher = new SocketEventPublisher(io, (code) => code === room.code ? room as never : undefined, sessions, new RoomPresenter(clock), clock);
 
   publisher.publish({ type: 'game-paused', roomCode: room.code, playerId: 'host' });
 

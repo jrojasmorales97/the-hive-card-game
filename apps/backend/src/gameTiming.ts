@@ -7,14 +7,14 @@ export const ERROR_LOCK_MS = 5000;
 export const STAR_RESOLUTION_LOCK_MS = 5000;
 export const LEVEL_COMPLETE_LOCK_MS = 5000;
 
-export function createInteractionLock(reason: InteractionLockReason, durationMs: number, now = Date.now()): InteractionLock {
+export function createInteractionLock(reason: InteractionLockReason, durationMs: number, now: number): InteractionLock {
   return {
     reason,
     until: now + Math.max(0, durationMs),
   };
 }
 
-export function isInteractionLockActive(lock: InteractionLock | null | undefined, now = Date.now()): boolean {
+export function isInteractionLockActive(lock: InteractionLock | null | undefined, now: number): boolean {
   return Boolean(lock && lock.until > now);
 }
 

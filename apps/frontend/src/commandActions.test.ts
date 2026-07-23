@@ -16,7 +16,7 @@ test('buildCommandActions maps round-out private actions to a disabled hive plac
       type: 'round_out_wait',
       visible: true,
       enabled: false,
-      reason: 'The hive is resolving the round without your swarm',
+      reason: 'Waiting for others',
     },
     showCancelStar: false,
     showAcceptStar: false,
@@ -34,7 +34,7 @@ test('buildCommandActions maps round-out private actions to a disabled hive plac
   assert.deepEqual(actions, [
     {
       key: 'hive-sync',
-      label: 'The hive is resolving the round without your swarm',
+      label: 'Waiting for others',
       icon: 'hive',
       className: 'command-button secondary prep-placeholder',
       disabled: true,
@@ -149,7 +149,7 @@ test('buildCommandActions keeps star consensus CTAs ahead of the round-out place
       type: 'round_out_wait',
       visible: true,
       enabled: false,
-      reason: 'The hive is resolving the round without your swarm',
+      reason: 'Waiting for others',
     },
     acceptStarAction: {
       type: 'accept_star',

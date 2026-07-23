@@ -3,6 +3,7 @@ import type { Server } from 'socket.io';
 import type { ApplicationRoom } from '../../application/model.js';
 import type { ApplicationEvent } from '../../application/result.js';
 import type { ApplicationEventPublisher } from '../../application/ports/eventPublisher.js';
+import type { Clock } from '../../application/ports/clock.js';
 import { RoomPresenter } from './roomPresenter.js';
 import { SessionRegistry } from './sessionRegistry.js';
 
@@ -16,14 +17,14 @@ export class SocketEventPublisher implements ApplicationEventPublisher {
     private readonly rooms: (roomCode: string) => RuntimeRoom | undefined,
     private readonly sessions: SessionRegistry,
     private readonly presenter: RoomPresenter,
-    private readonly now: () => number,
+    private readonly clock: Clock,
   ) {}
 
   emitRoomUpdate(roomCode: string, incrementVersion = true): void {
     const room = this.rooms(roomCode);
     if (!room) return;
     if (incrementVersion) room.version += 1;
-    const serverTime = this.now();
+    const serverTime = this.clock.now();
     this.io.to(roomCode).emit('room:update', this.presenter.publicEnvelope(room, serverTime));
     for (const player of Object.values(room.players)) {
       const socketId = this.sessions.socketIdForPlayer(player.id);
@@ -34,7 +35,7 @@ export class SocketEventPublisher implements ApplicationEventPublisher {
   }
 
   emitGameLog(roomCode: string, type: GameLogType, payload: Record<string, unknown> = {}): void {
-    const timestamp = this.now();
+    const timestamp = this.clock.now();
     const entry: GameLogEvent = { id: `${timestamp}-${++this.logSequence}`, ts: timestamp, roomCode, type, payload };
     const room = this.rooms(roomCode);
     if (room) {

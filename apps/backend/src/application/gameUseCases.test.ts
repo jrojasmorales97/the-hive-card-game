@@ -28,6 +28,7 @@ function fixture(now = 100) {
       schedule: (roomCode, key, effect) => scheduled.set(`${roomCode}:${key}`, effect),
       cancel: (roomCode, key) => scheduled.delete(`${roomCode}:${key}`),
       cancelRoom: (roomCode) => { for (const key of scheduled.keys()) if (key.startsWith(`${roomCode}:`)) scheduled.delete(key); },
+      cancelAll: () => scheduled.clear(),
     },
     clock: { now: () => now },
     random: { next: () => { randomCalls += 1; return 0.999; } },
@@ -82,6 +83,7 @@ test('retry resets the terminal game, replaces dealing work, and keeps literal a
   assert.equal(retried.data.room.game?.interactionLock?.until, 150);
   assert.equal(randomCalls(), 198);
   assert.deepEqual(events.map((event) => event.type), ['game-started', 'game-restarted']);
+  assert.deepEqual(retried.directives.map((directive) => directive.type), ['cancel-room', 'replace']);
   assert.notEqual(scheduled.get('HIVE01:dealing-expired')?.expectedVersion, firstEffect?.expectedVersion);
 });
 
