@@ -1,26 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-// useLayoutEffect alias - avoids SSR warnings while being semantically clear
-import { io, Socket } from 'socket.io-client';
 import type {
-  ClientToServerEvents,
-  FinalPlayerResult,
-  InteractionLock,
   PrivateAction,
-  PrivatePlayerEnvelope,
-  PrivatePlayerState,
-  PublicRoomEnvelope,
   PublicRoomState,
-  RoomSnapshot,
-  ServerToClientEvents,
   StarDiscardPreview,
   GamePhase,
   PileEntry,
-  JoinRoomAck,
-  ResyncAck,
 } from '@the-hive/contracts';
-import { deriveConnectionState, RESYNC_INTERVAL_MS, RESYNC_TIMEOUT_MS, type ConnectionState } from './connectionStatus.js';
+import { useRoomSession } from './app/state/index.js';
 import {
   countdownValueFromRemaining,
+  nextCountdownRefreshDelayMs,
   handDealAnimationMode,
   handDealStateKey,
   isCountdownLockActive,
@@ -28,30 +17,24 @@ import {
   isInteractionLockActive,
   lobbyStartDealDelayMs,
 } from './gameUi.js';
-import {
-  applyPrivateFragment,
-  applyPrivateSnapshot,
-  applyPublicFragment,
-  createSnapshotCorrelationState,
-  estimateServerClockOffset,
-  estimateServerNow,
-  shouldApplyDecorativeEvent,
-} from './roomSync.js';
+import { estimateServerNow } from './roomSync.js';
 import {
   findMyStarDiscard,
   getStarProposalButtons,
   starDiscardLaunchDelayMs,
 } from './starUi.js';
 import { buildHandLayout, buildHandSlotPath, type HandSlotId } from './handLayout.js';
-import { podiumToneForRank, shouldUseTwoColumnFinalScoreLayout, timingFeedbackForBand } from './finalScoreUi.js';
 import { levelCompleteOverlayDelayMs } from './levelFlow.js';
-import { buildLobbySeats, shouldShowTopbarRoomCode, waitingRoomMessage } from './lobbyUi.js';
+import { shouldShowTopbarRoomCode } from './lobbyUi.js';
 import { buildCommandActions, gameplayControlDisabled } from './commandActions.js';
+import { GameScreen } from './features/game/index.js';
+import { LobbyScreen } from './features/lobby/index.js';
+import { ResultsOverlay } from './features/results/index.js';
+import { RoomAccessScreen } from './features/room-access/index.js';
+import { AppBackground } from './shared/ui/index.js';
 import logoUrl from '../the-hive-logo.png';
 import {
-  DEFEAT_SUBTITLE,
   INFO_MESSAGE_DURATION_MS,
-  VICTORY_SUBTITLE,
   overlayDurationMs,
   overlaySubtitle,
   gameplayOverlayBlockedReason,
@@ -113,11 +96,6 @@ type LogSegment = {
   playerId?: string;
 };
 
-type StarUsedPayload = {
-  message?: string;
-  discarded?: StarDiscardPreview[];
-};
-
 declare global {
   interface Window {
     __ENV?: Record<string, string> | undefined;
@@ -132,12 +110,6 @@ const SOCKET_URL =
     // fallback to current origin
     (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001'));
 
-const STORAGE_KEYS = {
-  playerId: 'th:playerId',
-  playerName: 'th:playerName',
-  lastRoomCode: 'th:lastRoomCode',
-};
-
 const PLAYER_PALETTE = ['#2EEBFF', '#FF2FAE', '#FFCC00', '#FFFFFF', '#9DFF8A', '#FF8A3D', '#B88CFF', '#7CFFCB'] as const;
 const RIVAL_POSITIONS = [
   'corner-top-left',
@@ -149,8 +121,6 @@ const RIVAL_POSITIONS = [
   'corner-right-center',
 ] as const;
 const SELF_POSITION = 'corner-bottom-right' as const;
-const MAX_LOBBY_PLAYERS = 8;
-
 const REWARDS: Record<number, 'life' | 'star'> = {
   2: 'star',
   3: 'life',
@@ -191,24 +161,6 @@ function pickMessage(messages: string[], seed: number): string {
   return messages[Math.abs(seed) % messages.length];
 }
 
-function getOrCreateStablePlayerId(): string {
-  const existing = localStorage.getItem(STORAGE_KEYS.playerId);
-  if (existing) return existing;
-
-  const created =
-    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID().replace(/-/g, '')
-      : `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
-
-  localStorage.setItem(STORAGE_KEYS.playerId, created);
-  return created;
-}
-
-function getRoomCodeFromUrl(): string {
-  if (typeof window === 'undefined') return '';
-  const code = new URLSearchParams(window.location.search).get('room') ?? '';
-  return code.trim().toUpperCase();
-}
 function buildShareUrl(roomCode: string): string {
   if (typeof window === 'undefined') return '';
   const url = new URL(window.location.href);
@@ -422,91 +374,6 @@ function logSegments(entry: GameLogEvent): LogSegment[] {
   }
 }
 
-const RULES = [
-  {
-    icon: 'hub',
-    title: 'The Goal',
-    body: 'Play all 100 cards in ascending order as a team - in complete silence. No talking, no signals, no gestures. Only shared instinct.',
-  },
-  {
-    icon: 'style',
-    title: 'Play Your Lowest',
-    body: 'Each round you hold cards. When the timing feels right, play your lowest. If someone plays out of order, the team loses a life and all lower cards are discarded automatically.',
-  },
-  {
-    icon: 'task_alt',
-    title: 'Ready & Pause',
-      body: 'Before each round starts, every player with cards must press Ready. Any player can call a Pause mid-game - the round resumes only when the players who still hold cards mark Ready again.',
-  },
-  {
-    icon: 'auto_awesome',
-    title: 'Lives, Stars & Rewards',
-    body: 'Stars let the whole team discard their lowest card simultaneously. Clearing certain levels earns extra lives or stars as a reward.',
-  },
-];
-
-function RulesPanels() {
-  const [activeIndex, setActiveIndex] = useState(0);
-  const carouselRef = useRef<HTMLDivElement>(null);
-
-  const scrollTo = (i: number) => {
-    carouselRef.current?.scrollTo({ left: i * (carouselRef.current.clientWidth || 1), behavior: 'smooth' });
-  };
-
-  const handleScroll = () => {
-    const el = carouselRef.current;
-    if (!el) return;
-    setActiveIndex(Math.round(el.scrollLeft / el.clientWidth));
-  };
-
-  const goTo = (i: number) => {
-    setActiveIndex(i);
-    scrollTo(i);
-  };
-
-  return (
-    <div className="rules-carousel-wrap">
-      <h2 className="hero-tagline rules-shell-title">How to play</h2>
-      <section
-        className="rules-grid"
-        aria-label="How to play"
-        ref={carouselRef}
-        onScroll={handleScroll}
-      >
-        {RULES.map(({ icon, title, body }) => (
-          <div key={title} className="rules-card panel">
-            <div className="rules-head">
-              <span className="material-symbols-rounded rules-icon" aria-hidden>{icon}</span>
-              <h3 className="rules-title">{title}</h3>
-            </div>
-            <p className="rules-body">{body}</p>
-          </div>
-        ))}
-      </section>
-      <div className="rules-dots" aria-hidden>
-        {RULES.map((_, i) => (
-          <button key={i} className={`rules-dot${i === activeIndex ? ' active' : ''}`} onClick={() => goTo(i)} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function MainBrandMark({ heading = false, className = '' }: { heading?: boolean; className?: string }) {
-  const brandClassName = `hero-title brand-mark brand-mark-main${className ? ` ${className}` : ''}`;
-  const image = <img className="brand-logo-img" src={logoUrl} alt={heading ? 'The Hive' : ''} />;
-
-  if (heading) {
-    return <h1 className={brandClassName}>{image}</h1>;
-  }
-
-  return (
-    <div className={brandClassName} aria-hidden>
-      {image}
-    </div>
-  );
-}
-
 function TableBrandMark() {
   return (
     <div className="brand-mark brand-mark-table" aria-hidden>
@@ -516,84 +383,33 @@ function TableBrandMark() {
   );
 }
 
-function HexGrid() {
-  const R = 100;
-  const colStep = R * 1.5;
-  const rowStep = R * Math.sqrt(3);
-  const COLS = 9;
-  const ROWS = 4;
-
-  const hexPoints = (cx: number, cy: number) =>
-    Array.from({ length: 6 }, (_, i) => {
-      const a = (Math.PI / 3) * i;
-      return `${+(cx + R * Math.cos(a)).toFixed(1)},${+(cy + R * Math.sin(a)).toFixed(1)}`;
-    }).join(' ');
-
-  const vbW = (COLS - 1) * colStep + 2 * R;
-  const vbH = (ROWS - 1) * rowStep + rowStep / 2 + R;
-
-  const hexes = Array.from({ length: COLS }, (_, col) => {
-    const cx = col * colStep + R;
-    const yOff = col % 2 === 1 ? rowStep / 2 : 0;
-    return Array.from({ length: ROWS }, (_, row) => ({
-      points: hexPoints(cx, row * rowStep + yOff + R * 0.4),
-      key: `${col}-${row}`,
-    }));
-  }).flat();
-
-  return (
-    <svg
-      className="hero-hex-bg"
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox={`0 0 ${vbW.toFixed(0)} ${vbH.toFixed(0)}`}
-      preserveAspectRatio="xMidYMid slice"
-      aria-hidden
-    >
-      {hexes.map(({ points, key }) => (
-        <polygon key={key} points={points} fill="none" stroke="#b889ff" strokeWidth="1" strokeOpacity="0.22" />
-      ))}
-    </svg>
-  );
-}
-
-function AppBackground() {
-  return (
-    <div className="app-bg" aria-hidden>
-      <HexGrid />
-      <div className="hero-orb hero-orb-a" />
-      <div className="hero-orb hero-orb-b" />
-    </div>
-  );
-}
-
-function HeroSection() {
-  return (
-    <div className="hero">
-      <div className="hero-inner">
-        <MainBrandMark heading />
-        <p className="hero-tagline">No talking | No signaling | In order</p>
-      </div>
-    </div>
-  );
-}
-
 export function App() {
-  const [socket, setSocket] = useState<Socket<ServerToClientEvents, ClientToServerEvents> | null>(null);
-  const [playerId, setPlayerId] = useState('');
-  const [playerName, setPlayerName] = useState('');
-  const [roomCodeInput, setRoomCodeInput] = useState('');
-  const [accessTab, setAccessTab] = useState<'create' | 'join'>('join');
-  const [room, setRoom] = useState<RoomState | null>(null);
-  const [hand, setHand] = useState<number[]>([]);
-  const [availableActions, setAvailableActions] = useState<AvailableAction[]>([]);
+  const session = useRoomSession(SOCKET_URL);
+  const {
+    room,
+    hand,
+    availableActions,
+    playerId,
+    playerName,
+    setPlayerName,
+    roomCodeInput,
+    setRoomCodeInput,
+    accessTab,
+    setAccessTab,
+    gameLog,
+    decorativeEvent,
+    kickedMessage,
+    clearKickedMessage,
+    serverClockOffsetRef,
+    sessionTransition,
+    completeStarDiscardAnimation,
+  } = session;
   const [error, setError] = useState<string>('');
   const [info, setInfo] = useState<string>('');
   const [eventOverlay, setEventOverlay] = useState<EventOverlay | null>(null);
-  const [gameLog, setGameLog] = useState<GameLogEvent[]>([]);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
   const [accessBusy, setAccessBusy] = useState(false);
-  const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
   const [countdown, setCountdown] = useState<3 | 2 | 1 | 'play' | null>(null);
   const [dealtHandCount, setDealtHandCount] = useState(0);
   const [isClearingPile, setIsClearingPile] = useState(false);
@@ -602,7 +418,7 @@ export function App() {
   const [hiddenStarDiscardCard, setHiddenStarDiscardCard] = useState<number | null>(null);
   const [starDiscardFlight, setStarDiscardFlight] = useState<StarDiscardFlight | null>(null);
 
-  const countdownTimeoutsRef = useRef<number[]>([]);
+  const countdownTimeoutRef = useRef<number | null>(null);
   const eventOverlayTimeoutRef = useRef<number | null>(null);
   const eventOverlayEndsAtRef = useRef<number | null>(null);
   const levelCompleteOverlayTimeoutRef = useRef<number | null>(null);
@@ -612,21 +428,10 @@ export function App() {
   const dealIntervalRef = useRef<number | null>(null);
   const pendingLobbyDealDelayMsRef = useRef(0);
   const previousHandDealStateKeyRef = useRef('');
-  const roomRef = useRef<RoomState | null>(null);
-  const playerNameRef = useRef('');
-  const manualAccessRef = useRef(false);
-  const skipNextAutoJoinRef = useRef(false);
-  const reconnectingRef = useRef(false);
-  const socketConnectedRef = useRef(false);
-  const syncInFlightRef = useRef(false);
-  const syncHealthyRef = useRef(false);
-  const resyncIntervalRef = useRef<number | null>(null);
-  const resyncTimeoutRef = useRef<number | null>(null);
+  const latestRoomRef = useRef<RoomState | null>(null);
   const logScrollRef = useRef<HTMLDivElement | null>(null);
   const logStickToBottomRef = useRef(true);
   const previousLogRoomCodeRef = useRef<string | null>(null);
-  const serverClockOffsetRef = useRef(0);
-  const snapshotCorrelationRef = useRef(createSnapshotCorrelationState<RoomState, PrivatePlayerState>());
   const prevPileCountRef = useRef(0);
   const previousResourceRef = useRef<{ lives: number | null; stars: number | null; level: number | null }>({
     lives: null,
@@ -647,6 +452,8 @@ export function App() {
   const pendingLocalPileEntryRef = useRef<{ card: number; entry: PileEntryOffset } | null>(null);
   const starDiscardFlightRef = useRef<HTMLElement | null>(null);
   const [pileEntryMap, setPileEntryMap] = useState<Record<string, PileEntryOffset>>({});
+  const completeStarDiscardAnimationRef = useRef(completeStarDiscardAnimation);
+  completeStarDiscardAnimationRef.current = completeStarDiscardAnimation;
 
   function setPlayerCornerRef(playerIdForRef: string) {
     return (node: HTMLElement | null) => {
@@ -687,74 +494,6 @@ export function App() {
     return estimateServerNow(serverClockOffsetRef.current);
   }
 
-  function applyClockSample(serverTime: number, clientSentAt?: number) {
-    if (typeof clientSentAt !== 'number') return;
-    serverClockOffsetRef.current = estimateServerClockOffset({
-      clientSentAt,
-      clientReceivedAt: Date.now(),
-      serverTime,
-    });
-  }
-
-  function commitAppliedSnapshot(snapshot: RoomSnapshot, opts?: { forceRevealHand?: boolean; clientSentAt?: number }) {
-    applyClockSample(snapshot.serverTime, opts?.clientSentAt);
-    pendingLobbyDealDelayMsRef.current = lobbyStartDealDelayMs({
-      previousRoomStatus: roomRef.current?.status ?? null,
-      nextRoomStatus: snapshot.publicState.status,
-      nextPhase: snapshot.publicState.game?.phase ?? null,
-      forceRevealHand: opts?.forceRevealHand,
-    });
-    setRoom(snapshot.publicState);
-    setHand(snapshot.privateState.hand ?? []);
-    setAvailableActions(snapshot.privateState.availableActions ?? []);
-
-    if (opts?.forceRevealHand) {
-      if (dealIntervalRef.current) {
-        window.clearInterval(dealIntervalRef.current);
-        dealIntervalRef.current = null;
-      }
-
-      setDealtHandCount(snapshot.privateState.hand.length);
-      previousHandDealStateKeyRef.current = handDealStateKey({
-        handKey: snapshot.privateState.hand.join(','),
-        roomStatus: snapshot.publicState.status,
-        phase: snapshot.publicState.game?.phase ?? null,
-      });
-    }
-
-    syncHealthyRef.current = true;
-    syncInFlightRef.current = false;
-    clearResyncTimeout();
-    refreshConnectionState(socketConnectedRef.current, Boolean(snapshot.publicState ?? roomRef.current));
-    return true;
-  }
-
-  function applyAuthoritativeSnapshot(snapshot: RoomSnapshot, opts?: { forceRevealHand?: boolean; clientSentAt?: number }) {
-    const result = applyPrivateSnapshot(snapshotCorrelationRef.current, snapshot);
-    snapshotCorrelationRef.current = result.state;
-    if (!result.applied) return false;
-
-    return commitAppliedSnapshot(result.applied, opts);
-  }
-
-  function applyCorrelatedSnapshot(snapshot: RoomSnapshot) {
-    return commitAppliedSnapshot(snapshot);
-  }
-
-  function applyPublicStateFragment(fragment: { version: number; serverTime: number; publicState: RoomState }) {
-    const result = applyPublicFragment(snapshotCorrelationRef.current, fragment);
-    snapshotCorrelationRef.current = result.state;
-    if (!result.applied) return;
-    void applyCorrelatedSnapshot(result.applied);
-  }
-
-  function applyPrivateStateFragment(fragment: { version: number; serverTime: number; privateState: PrivatePlayerState }) {
-    const result = applyPrivateFragment(snapshotCorrelationRef.current, fragment);
-    snapshotCorrelationRef.current = result.state;
-    if (!result.applied) return;
-    void applyCorrelatedSnapshot(result.applied);
-  }
-
   useEffect(() => {
     if (!room || !info) return;
     const t = window.setTimeout(() => setInfo(''), INFO_MESSAGE_DURATION_MS);
@@ -772,7 +511,7 @@ export function App() {
   }
 
   function scheduleLevelCompleteOverlay(payload: { levelCompleted: number; reward: LevelReward }) {
-    const currentPileCount = roomRef.current?.game?.pileHistory?.length ?? 0;
+    const currentPileCount = latestRoomRef.current?.game?.pileHistory?.length ?? 0;
 
     if (pileClearStartTimeoutRef.current) window.clearTimeout(pileClearStartTimeoutRef.current);
     if (levelCompleteOverlayTimeoutRef.current) window.clearTimeout(levelCompleteOverlayTimeoutRef.current);
@@ -794,7 +533,7 @@ export function App() {
     });
 
     levelCompleteOverlayTimeoutRef.current = window.setTimeout(() => {
-      const activeLock = roomRef.current?.game?.interactionLock;
+      const activeLock = latestRoomRef.current?.game?.interactionLock;
       const remainingLockMs =
         activeLock?.reason === 'level-complete' ? Math.max(0, activeLock.until - Date.now()) : 0;
 
@@ -813,13 +552,6 @@ export function App() {
     }, overlayDelayMs);
   }
 
-  function pushLog(entry: GameLogEvent) {
-    setGameLog((prev) => {
-      if (prev.some((item) => item.id === entry.id)) return prev;
-      return [...prev, entry].slice(-50);
-    });
-  }
-
   function onLogScroll() {
     const el = logScrollRef.current;
     if (!el) return;
@@ -831,30 +563,64 @@ export function App() {
   }
 
   useEffect(() => {
-    roomRef.current = room;
+    if (!sessionTransition || !room) return;
+    pendingLobbyDealDelayMsRef.current = lobbyStartDealDelayMs({
+      previousRoomStatus: sessionTransition.previousRoomStatus,
+      nextRoomStatus: room.status,
+      nextPhase: room.game?.phase ?? null,
+      forceRevealHand: sessionTransition.forceRevealHand,
+    });
+    if (!sessionTransition.forceRevealHand) return;
+    if (dealIntervalRef.current) {
+      window.clearInterval(dealIntervalRef.current);
+      dealIntervalRef.current = null;
+    }
+    setDealtHandCount(hand.length);
+    previousHandDealStateKeyRef.current = handDealStateKey({
+      handKey: hand.join(','),
+      roomStatus: room.status,
+      phase: room.game?.phase ?? null,
+    });
+  }, [hand, room, sessionTransition]);
+
+  useEffect(() => {
+    latestRoomRef.current = room;
   }, [room]);
 
   useEffect(() => {
-    playerNameRef.current = playerName;
-  }, [playerName]);
+    if (!kickedMessage) return;
+    clearPresentationState();
+    setError(kickedMessage);
+    clearKickedMessage();
+  }, [clearKickedMessage, kickedMessage]);
 
-  function refreshConnectionState(socketConnected: boolean, hasRoom = Boolean(roomRef.current)) {
-    setConnectionState(
-      deriveConnectionState({
-        socketConnected,
-        reconnecting: reconnectingRef.current,
-        hasRoom,
-        syncInFlight: syncInFlightRef.current,
-        syncHealthy: syncHealthyRef.current,
-      }),
-    );
-  }
-
-  function clearResyncTimeout() {
-    if (!resyncTimeoutRef.current) return;
-    window.clearTimeout(resyncTimeoutRef.current);
-    resyncTimeoutRef.current = null;
-  }
+  useEffect(() => {
+    if (!decorativeEvent) return;
+    if (decorativeEvent.type === 'error') {
+      showEventOverlay({ kind: 'error', title: 'ERROR', message: overlaySubtitle('error'), tone: 'error', errorData: decorativeEvent.payload }, overlayDurationMs('error'));
+      return;
+    }
+    if (decorativeEvent.type === 'paused') {
+      showEventOverlay({ kind: 'pause', title: 'PAUSE REQUESTED', message: overlaySubtitle('pause'), tone: 'warn' }, overlayDurationMs('pause'));
+      return;
+    }
+    if (decorativeEvent.type === 'star-used') {
+      const localDiscardCard = findMyStarDiscard(decorativeEvent.payload.discarded ?? [], playerId);
+      if (localDiscardCard !== null) setPendingLocalStarDiscardCard(localDiscardCard);
+      showEventOverlay({ kind: 'star-used', title: 'STAR RESOLVED', message: overlaySubtitle('star-used'), tone: 'good', starDiscards: decorativeEvent.payload.discarded ?? [] }, overlayDurationMs('star-used'));
+      return;
+    }
+    if (decorativeEvent.type === 'level-complete') {
+      scheduleLevelCompleteOverlay(decorativeEvent.payload);
+      return;
+    }
+    if (decorativeEvent.type === 'restarted') {
+      showEventOverlay({ kind: 'restarted', title: 'GAME RESTARTED', message: overlaySubtitle('restarted'), tone: 'info' }, overlayDurationMs('restarted'));
+      return;
+    }
+    setEventOverlay(null);
+    eventOverlayEndsAtRef.current = null;
+  }, [decorativeEvent, playerId]);
 
   useEffect(() => {
     if (!showExitConfirm) return;
@@ -866,20 +632,6 @@ export function App() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [showExitConfirm]);
-
-  useEffect(() => {
-    const stableId = getOrCreateStablePlayerId();
-    setPlayerId(stableId);
-
-    const savedName = localStorage.getItem(STORAGE_KEYS.playerName) ?? '';
-    setPlayerName(savedName);
-
-    const roomFromUrl = getRoomCodeFromUrl();
-    const savedRoom = roomFromUrl || localStorage.getItem(STORAGE_KEYS.lastRoomCode) || '';
-    if (roomFromUrl) localStorage.setItem(STORAGE_KEYS.lastRoomCode, roomFromUrl);
-    setRoomCodeInput(savedRoom);
-    if (savedRoom) setAccessTab('join');
-  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -894,292 +646,33 @@ export function App() {
     window.history.replaceState({}, '', url.toString());
   }, [room?.code, room?.shareable]);
 
-  useEffect(() => {
-    if (!playerName) return;
-    localStorage.setItem(STORAGE_KEYS.playerName, playerName);
-  }, [playerName]);
-
-  useEffect(() => {
-    if (!playerId) return;
-
-    const s: Socket<ServerToClientEvents, ClientToServerEvents> = io(SOCKET_URL, {
-      transports: ['websocket'],
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 500,
-      reconnectionDelayMax: 3000,
-    }) as Socket<ServerToClientEvents, ClientToServerEvents>;
-    setSocket(s);
-
-    const performResync = (opts?: { forceUiSyncing?: boolean }) => {
-      const targetRoom = roomRef.current?.code ?? (localStorage.getItem(STORAGE_KEYS.lastRoomCode) ?? '').trim().toUpperCase();
-      const targetName = playerNameRef.current.trim() || (localStorage.getItem(STORAGE_KEYS.playerName) ?? '').trim();
-
-      if (!s.connected || !targetRoom || !targetName || syncInFlightRef.current) {
-        refreshConnectionState(Boolean(s.connected), Boolean(targetRoom || roomRef.current));
-        return;
-      }
-
-      syncInFlightRef.current = true;
-      if (opts?.forceUiSyncing) syncHealthyRef.current = false;
-      refreshConnectionState(true, true);
-
-      clearResyncTimeout();
-      resyncTimeoutRef.current = window.setTimeout(() => {
-        syncInFlightRef.current = false;
-        syncHealthyRef.current = false;
-        refreshConnectionState(Boolean(s.connected), true);
-      }, RESYNC_TIMEOUT_MS);
-
-      const joinSentAt = Date.now();
-      s.emit('room:join', { roomCode: targetRoom, playerName: targetName, playerId }, (response: JoinRoomAck) => {
-        if (!response?.ok) {
-          syncInFlightRef.current = false;
-          syncHealthyRef.current = false;
-          clearResyncTimeout();
-          localStorage.removeItem(STORAGE_KEYS.lastRoomCode);
-          refreshConnectionState(Boolean(s.connected), true);
-          setInfo('Could not restore session automatically.');
-          return;
-        }
-
-        if (response.snapshot) applyAuthoritativeSnapshot(response.snapshot, { clientSentAt: joinSentAt });
-
-        const resyncSentAt = Date.now();
-        s.emit('room:resync', (syncResponse: ResyncAck) => {
-          if (!syncResponse?.ok) {
-            syncHealthyRef.current = false;
-            syncInFlightRef.current = false;
-            clearResyncTimeout();
-            refreshConnectionState(Boolean(s.connected), true);
-            return;
-          }
-
-          if (syncResponse.snapshot) {
-            applyAuthoritativeSnapshot(syncResponse.snapshot, { forceRevealHand: true, clientSentAt: resyncSentAt });
-          }
-        });
-      });
-    };
-
-    s.on('connect', () => {
-      socketConnectedRef.current = true;
-      reconnectingRef.current = false;
-      setError('');
-
-      if (manualAccessRef.current) return;
-      if (skipNextAutoJoinRef.current) {
-        skipNextAutoJoinRef.current = false;
-        return;
-      }
-
-      if (!roomRef.current && !(localStorage.getItem(STORAGE_KEYS.lastRoomCode) ?? '').trim()) {
-        syncHealthyRef.current = true;
-        refreshConnectionState(true, false);
-        return;
-      }
-
-      performResync({ forceUiSyncing: Boolean(roomRef.current) });
-    });
-
-    s.on('disconnect', () => {
-      socketConnectedRef.current = false;
-      reconnectingRef.current = false;
-      syncInFlightRef.current = false;
-      syncHealthyRef.current = false;
-      clearResyncTimeout();
-      refreshConnectionState(false);
-      setInfo('Connection lost. Retrying...');
-    });
-
-    (s as Socket).on('reconnect_attempt', () => {
-      socketConnectedRef.current = false;
-      reconnectingRef.current = true;
-      syncHealthyRef.current = false;
-      refreshConnectionState(false);
-    });
-
-    s.on('connect_error', () => {
-      socketConnectedRef.current = false;
-      reconnectingRef.current = true;
-      syncHealthyRef.current = false;
-      refreshConnectionState(false);
-    });
-
-    s.on('room:snapshot', (snapshot: RoomSnapshot) => {
-      if (applyAuthoritativeSnapshot(snapshot) && Array.isArray(snapshot.publicState.logs)) {
-        setGameLog(snapshot.publicState.logs.slice(-50));
-      }
-    });
-
-    s.on('room:update', (payload: PublicRoomEnvelope) => {
-      applyPublicStateFragment(payload);
-      if (Array.isArray(payload.publicState.logs)) {
-        setGameLog(payload.publicState.logs.slice(-50));
-      }
-    });
-
-    s.on('game:log', (entry: GameLogEvent) => {
-      pushLog(entry);
-    });
-
-    s.on('player:state', (payload: PrivatePlayerEnvelope) => {
-      applyPrivateStateFragment(payload);
-    });
-
-    s.on('room:kicked', (payload: { message?: string }) => {
-      localStorage.removeItem(STORAGE_KEYS.lastRoomCode);
-      skipNextAutoJoinRef.current = true;
-      clearRoomState();
-      setRoomCodeInput('');
-      setAccessTab('join');
-      setError(payload?.message ?? 'The host removed you from the room.');
-    });
-
-    s.on(
-      'game:error-penalty',
-      (payload: {
-        version?: number;
-        playedCard: { value: number; playerId: string; playerName: string };
-        blockingCards: Array<{ value: number; playerId: string; playerName: string }>;
-      }) => {
-        if (!shouldApplyDecorativeEvent(payload?.version, snapshotCorrelationRef.current.lastAppliedVersion)) return;
-        showEventOverlay(
-          {
-            kind: 'error',
-            title: 'ERROR',
-            message: overlaySubtitle('error'),
-            tone: 'error',
-            errorData: payload,
-          },
-          overlayDurationMs('error'),
-        );
-      },
-    );
-
-    s.on('game:paused', (payload: { version?: number; message?: string }) => {
-      if (!shouldApplyDecorativeEvent(payload?.version, snapshotCorrelationRef.current.lastAppliedVersion)) return;
-      showEventOverlay(
-        {
-          kind: 'pause',
-          title: 'PAUSE REQUESTED',
-          message: overlaySubtitle('pause'),
-          tone: 'warn',
-        },
-        overlayDurationMs('pause'),
-      );
-    });
-
-    s.on('game:star-used', (payload: StarUsedPayload & { version?: number }) => {
-      if (!shouldApplyDecorativeEvent(payload?.version, snapshotCorrelationRef.current.lastAppliedVersion)) return;
-      const localDiscardCard = findMyStarDiscard(payload?.discarded ?? [], playerId);
-      if (localDiscardCard !== null) setPendingLocalStarDiscardCard(localDiscardCard);
-      showEventOverlay(
-        {
-          kind: 'star-used',
-          title: 'STAR RESOLVED',
-          message: overlaySubtitle('star-used'),
-          tone: 'good',
-          starDiscards: payload?.discarded ?? [],
-        },
-        overlayDurationMs('star-used'),
-      );
-    });
-    s.on('game:level-complete', (payload: { version?: number; levelCompleted: number; reward: LevelReward }) => {
-      if (!shouldApplyDecorativeEvent(payload?.version, snapshotCorrelationRef.current.lastAppliedVersion)) return;
-      scheduleLevelCompleteOverlay(payload);
-    });
-
-    s.on('game:next-level-ready', (payload: { version?: number }) => {
-      if (!shouldApplyDecorativeEvent(payload?.version, snapshotCorrelationRef.current.lastAppliedVersion)) return;
-      // ready state handled via room:update
-    });
-
-    s.on('game:restarted', (payload: { version?: number; message?: string }) => {
-      if (!shouldApplyDecorativeEvent(payload?.version, snapshotCorrelationRef.current.lastAppliedVersion)) return;
-      showEventOverlay(
-        {
-          kind: 'restarted',
-          title: 'GAME RESTARTED',
-          message: overlaySubtitle('restarted'),
-          tone: 'info',
-        },
-        overlayDurationMs('restarted'),
-      );
-    });
-
-    s.on('game:over', (payload: { version?: number }) => {
-      if (!shouldApplyDecorativeEvent(payload?.version, snapshotCorrelationRef.current.lastAppliedVersion)) return;
-      setEventOverlay(null);
-      eventOverlayEndsAtRef.current = null;
-    });
-
-    resyncIntervalRef.current = window.setInterval(() => {
-      if (!s.connected || !roomRef.current || syncInFlightRef.current) return;
-
-      syncInFlightRef.current = true;
-      refreshConnectionState(true, true);
-
-      clearResyncTimeout();
-      resyncTimeoutRef.current = window.setTimeout(() => {
-        syncInFlightRef.current = false;
-        syncHealthyRef.current = false;
-        refreshConnectionState(Boolean(s.connected), true);
-      }, RESYNC_TIMEOUT_MS);
-
-      const resyncSentAt = Date.now();
-      s.emit('room:resync', (response: any) => {
-        if (!response?.ok) {
-          syncInFlightRef.current = false;
-          syncHealthyRef.current = false;
-          clearResyncTimeout();
-          refreshConnectionState(Boolean(s.connected), true);
-          return;
-        }
-
-        if (response.snapshot) {
-          applyAuthoritativeSnapshot(response.snapshot, { forceRevealHand: true, clientSentAt: resyncSentAt });
-        }
-      });
-    }, RESYNC_INTERVAL_MS);
-
-    return () => {
-      if (eventOverlayTimeoutRef.current) window.clearTimeout(eventOverlayTimeoutRef.current);
-      if (levelCompleteOverlayTimeoutRef.current) window.clearTimeout(levelCompleteOverlayTimeoutRef.current);
-      if (resyncIntervalRef.current) window.clearInterval(resyncIntervalRef.current);
-      clearResyncTimeout();
-      s.disconnect();
-    };
-  }, [playerId]);
 
   useEffect(() => {
     const lock = room?.game?.interactionLock;
 
-    countdownTimeoutsRef.current.forEach((timeout) => window.clearTimeout(timeout));
-    countdownTimeoutsRef.current = [];
+    if (countdownTimeoutRef.current !== null) window.clearTimeout(countdownTimeoutRef.current);
+    countdownTimeoutRef.current = null;
 
-    if (!isCountdownLockActive(lock)) {
+    if (!isCountdownLockActive(lock, getEstimatedServerNow())) {
       setCountdown(null);
       return () => {
-        countdownTimeoutsRef.current.forEach((timeout) => window.clearTimeout(timeout));
+        if (countdownTimeoutRef.current !== null) window.clearTimeout(countdownTimeoutRef.current);
       };
     }
 
     const countdownLock = lock!;
 
     const refreshCountdown = () => {
-      setCountdown(countdownValueFromRemaining(countdownLock.until - getEstimatedServerNow()));
+      const remainingMs = countdownLock.until - getEstimatedServerNow();
+      setCountdown(countdownValueFromRemaining(remainingMs));
+      const delay = nextCountdownRefreshDelayMs(remainingMs);
+      if (delay !== null) countdownTimeoutRef.current = window.setTimeout(refreshCountdown, delay);
     };
 
     refreshCountdown();
 
-    [countdownLock.until - 2000, countdownLock.until - 1000, countdownLock.until].forEach((target) => {
-      const delay = target - getEstimatedServerNow();
-      if (delay > 0) countdownTimeoutsRef.current.push(window.setTimeout(refreshCountdown, delay));
-    });
-
     return () => {
-      countdownTimeoutsRef.current.forEach((timeout) => window.clearTimeout(timeout));
+      if (countdownTimeoutRef.current !== null) window.clearTimeout(countdownTimeoutRef.current);
     };
   }, [room?.game?.interactionLock]);
 
@@ -1276,7 +769,6 @@ export function App() {
   useEffect(() => {
     const code = room?.code ?? null;
     if (previousLogRoomCodeRef.current !== code) {
-      setGameLog([]);
       logStickToBottomRef.current = true;
       previousLogRoomCodeRef.current = code;
     }
@@ -1437,11 +929,11 @@ export function App() {
     animation.onfinish = () => {
       setStarDiscardFlight(null);
       setPendingLocalStarDiscardCard(null);
-      socket?.emit('star:discard-animation-complete');
+      void completeStarDiscardAnimationRef.current();
     };
 
     return () => animation.cancel();
-  }, [socket, starDiscardFlight]);
+  }, [starDiscardFlight]);
 
   useEffect(() => {
     const nextLives = game?.lives ?? null;
@@ -1484,7 +976,6 @@ export function App() {
     [],
   );
 
-  const isHost = room?.hostId === playerId;
   const isLobbyRoom = room?.status === 'lobby';
   const isPlaying = game?.phase === 'playing';
   const hasStarProposal = !!game?.starProposal;
@@ -1542,7 +1033,6 @@ export function App() {
     game && (game.phase === 'focus' || activeInteractionLock?.reason === 'dealing' || isCountdownLockActive(activeInteractionLock)),
   );
   const placeholderLabel = showRoundClearingPlaceholder ? 'The hive is still clearing' : prepLabel;
-  const currentReward = game ? rewardLabel(game.currentLevel) : 'No reward';
   const currentRewardType = game ? REWARDS[game.currentLevel] ?? null : null;
   const dealtCards = useMemo(() => hand.slice(0, dealtHandCount), [hand, dealtHandCount]);
   const orderedDealtCards = useMemo(() => [...dealtCards].sort((a, b) => a - b), [dealtCards]);
@@ -1552,10 +1042,6 @@ export function App() {
   const queueCurveSlot = handLayout.curveSlot;
   const showQueueCurveSlot = Boolean(queueCurveSlot);
   const queueBottomRow = handLayout.bottomRow;
-  const finalResults = game?.finalResults ?? [];
-  const showTwoColumnFinalScoreLayout = shouldUseTwoColumnFinalScoreLayout(finalResults.length);
-  const hostPlayer = room?.players.find((player) => player.id === room.hostId) ?? null;
-  const lobbySeats = useMemo(() => buildLobbySeats(room?.players ?? [], MAX_LOBBY_PLAYERS), [room?.players]);
   const queueCardStyle = (slotId: HandSlotId, card: number | null) => {
     const slotIndex = Math.max(0, handLayout.slotOrder.indexOf(slotId) - 1);
     return {
@@ -1654,15 +1140,7 @@ export function App() {
                       ? () => setReady(false)
                       : () => {},
   }));
-  function saveRoomCode(roomCode: string, inputCode = roomCode) {
-    localStorage.setItem(STORAGE_KEYS.lastRoomCode, roomCode);
-    setRoomCodeInput(inputCode);
-  }
-
-  function clearRoomState() {
-    setRoom(null);
-    setHand([]);
-    setAvailableActions([]);
+  function clearPresentationState() {
     setEventOverlay(null);
     setPendingLocalStarDiscardCard(null);
     setHiddenStarDiscardCard(null);
@@ -1681,47 +1159,22 @@ export function App() {
     }
     pendingLobbyDealDelayMsRef.current = 0;
     eventOverlayEndsAtRef.current = null;
-    setGameLog([]);
     setLogOpen(false);
-    snapshotCorrelationRef.current = createSnapshotCorrelationState<RoomState, PrivatePlayerState>();
-    serverClockOffsetRef.current = 0;
     prevPileCountRef.current = 0;
     previousHandSlotMapRef.current = {};
     pendingLocalPileEntryRef.current = null;
   }
-  function emitWithAck<T>(event: keyof ClientToServerEvents, payload?: unknown): Promise<T> {
-    return new Promise((resolve) => {
-      if (!socket) {
-        resolve({ ok: false, error: 'No socket connection' } as T);
-        return;
-      }
-
-      if (typeof payload === 'undefined') {
-        (socket as Socket).emit(event, (response: T) => resolve(response));
-        return;
-      }
-
-      (socket as Socket).emit(event, payload, (response: T) => resolve(response));
-    });
-  }
-
   async function createRoom() {
     setError('');
     setInfo('');
 
-    if (!socket) return;
     if (!playerName.trim()) {
       setError('Enter your name');
       return;
     }
 
-    manualAccessRef.current = true;
     setAccessBusy(true);
-
-    const requestSentAt = Date.now();
-    const response = await emitWithAck<any>('room:create', { playerName, playerId });
-
-    manualAccessRef.current = false;
+    const response = await session.createRoom();
     setAccessBusy(false);
 
     if (!response?.ok) {
@@ -1729,17 +1182,12 @@ export function App() {
       return;
     }
 
-    if (response.snapshot) applyAuthoritativeSnapshot(response.snapshot, { clientSentAt: requestSentAt, forceRevealHand: true });
-    if (response.snapshot?.publicState) {
-      saveRoomCode(response.snapshot.publicState.code, response.snapshot.publicState.displayCode ?? response.snapshot.publicState.code);
-    }
   }
 
   async function joinRoom() {
     setError('');
     setInfo('');
 
-    if (!socket) return;
     if (!playerName.trim()) {
       setError('Enter your name');
       return;
@@ -1749,27 +1197,13 @@ export function App() {
       return;
     }
 
-    manualAccessRef.current = true;
     setAccessBusy(true);
-
-    const requestSentAt = Date.now();
-    const response = await emitWithAck<any>('room:join', {
-      roomCode: roomCodeInput.trim().toUpperCase(),
-      playerName,
-      playerId,
-    });
-
-    manualAccessRef.current = false;
+    const response = await session.joinRoom(roomCodeInput.trim().toUpperCase());
     setAccessBusy(false);
 
     if (!response?.ok) {
       setError(response?.error ?? 'Could not join room');
       return;
-    }
-
-    if (response.snapshot) applyAuthoritativeSnapshot(response.snapshot, { clientSentAt: requestSentAt, forceRevealHand: true });
-    if (response.snapshot?.publicState) {
-      saveRoomCode(response.snapshot.publicState.code, response.snapshot.publicState.displayCode ?? response.snapshot.publicState.code);
     }
 
   }
@@ -1781,9 +1215,8 @@ export function App() {
       setError(gameplayOverlayError ?? targetAction?.reason ?? 'Could not update ready state');
       return;
     }
-    if (!socket) return;
-    socket.emit('player:ready', { ready }, (response: any) => {
-      if (!response?.ok) setError(response?.error ?? 'Could not update ready state');
+    void session.setReady(ready).then((response) => {
+      if (!response.ok) setError(response.error ?? 'Could not update ready state');
     });
   }
 
@@ -1794,9 +1227,8 @@ export function App() {
       setError(gameplayOverlayError ?? startAction?.reason ?? 'Could not start game');
       return;
     }
-    if (!socket) return;
-    socket.emit('game:start', (response: any) => {
-      if (!response?.ok) {
+    void session.startGame().then((response) => {
+      if (!response.ok) {
         setError(response?.error ?? 'Could not start game');
         return;
       }
@@ -1827,8 +1259,7 @@ export function App() {
       }
     }
 
-    if (!socket) return;
-    socket.emit('game:play-card', { card }, (response: any) => {
+    void session.playCard(card).then((response) => {
       if (!response?.ok) {
         pendingLocalPileEntryRef.current = null;
         setError(response?.error ?? 'Could not play card');
@@ -1842,8 +1273,7 @@ export function App() {
       setError(gameplayOverlayError ?? pauseAction?.reason ?? 'Could not pause');
       return;
     }
-    if (!socket) return;
-    socket.emit('game:pause-request', (response: any) => {
+    void session.requestPause().then((response) => {
       if (!response?.ok) setError(response?.error ?? 'Could not pause');
     });
   }
@@ -1854,8 +1284,7 @@ export function App() {
       setError(gameplayOverlayError ?? proposeStarAction?.reason ?? 'Could not propose star');
       return;
     }
-    if (!socket) return;
-    socket.emit('star:propose', (response: any) => {
+    void session.proposeStar().then((response) => {
       if (!response?.ok) setError(response?.error ?? 'Could not propose star');
     });
   }
@@ -1866,8 +1295,7 @@ export function App() {
       setError(gameplayOverlayError ?? acceptStarAction?.reason ?? 'Could not accept star');
       return;
     }
-    if (!socket) return;
-    socket.emit('star:accept', (response: any) => {
+    void session.acceptStar().then((response) => {
       if (!response?.ok) setError(response?.error ?? 'Could not accept star');
     });
   }
@@ -1878,8 +1306,7 @@ export function App() {
       setError(gameplayOverlayError ?? cancelStarAction?.reason ?? 'Could not cancel star proposal');
       return;
     }
-    if (!socket) return;
-    socket.emit('star:cancel', (response: any) => {
+    void session.cancelStar().then((response) => {
       if (!response?.ok) setError(response?.error ?? 'Could not cancel star proposal');
     });
   }
@@ -1890,8 +1317,7 @@ export function App() {
       setError(gameplayOverlayError ?? rejectStarAction?.reason ?? 'Could not reject star');
       return;
     }
-    if (!socket) return;
-    socket.emit('star:reject', (response: any) => {
+    void session.rejectStar().then((response) => {
       if (!response?.ok) setError(response?.error ?? 'Could not reject star');
     });
   }
@@ -1927,23 +1353,23 @@ export function App() {
 
   async function leaveRoom(): Promise<boolean> {
     if (!room) {
-      clearRoomState();
+      clearPresentationState();
       return true;
     }
 
-    const response = await emitWithAck<any>('room:leave');
+    const response = await session.leaveRoom();
     if (!response?.ok) {
       setError(response?.error ?? 'Could not leave room');
       return false;
     }
 
-    clearRoomState();
+    session.resetRoom();
+    clearPresentationState();
     return true;
   }
 
   async function abandonMatch() {
-    localStorage.removeItem(STORAGE_KEYS.lastRoomCode);
-    skipNextAutoJoinRef.current = true;
+    session.abandonRoom();
     const ok = await leaveRoom();
     if (!ok) return;
   }
@@ -1962,7 +1388,6 @@ export function App() {
   }
 
   async function retryMatch() {
-    if (!socket) return;
     setError('');
     setInfo('');
     if (gameplayOverlayBlocked) {
@@ -1970,7 +1395,7 @@ export function App() {
       return;
     }
 
-    const response = await emitWithAck<any>('game:retry');
+    const response = await session.retryGame();
     if (!response?.ok) {
       setError(response?.error ?? 'Could not restart game');
       return;
@@ -2061,180 +1486,15 @@ export function App() {
         </section>
       )}
 
-      {!room && (
-        <div className="lobby-scroll">
-          <HeroSection />
-          <section className="panel lobby-panel">
-            <div className="tabs-row" role="tablist" aria-label="Room access">
-              <button
-                role="tab"
-                aria-selected={accessTab === 'join'}
-                className={`tab-btn ${accessTab === 'join' ? 'active' : ''}`}
-                onClick={() => setAccessTab('join')}
-              >
-                Join room
-              </button>
-              <button
-                role="tab"
-                aria-selected={accessTab === 'create'}
-                className={`tab-btn ${accessTab === 'create' ? 'active' : ''}`}
-                onClick={() => setAccessTab('create')}
-              >
-                Create room
-              </button>
-            </div>
+      {!room && <RoomAccessScreen playerName={playerName} roomCode={roomCodeInput} accessTab={accessTab} busy={accessBusy} onPlayerNameChange={setPlayerName} onRoomCodeChange={setRoomCodeInput} onAccessTabChange={setAccessTab} onCreate={() => void createRoom()} onJoin={() => void joinRoom()} />}
 
-            {accessTab === 'create' && (
-              <form
-                className="lobby-grid"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void createRoom();
-                }}
-              >
-                <label>
-                  Name
-                  <input
-                    value={playerName}
-                    onChange={(e) => setPlayerName(e.target.value)}
-                    placeholder="Your name"
-                  />
-                </label>
-
-                <div className="actions align-right">
-                  <button type="submit" disabled={accessBusy}>Create room</button>
-                </div>
-              </form>
-            )}
-
-            {accessTab === 'join' && (
-              <form
-                className="lobby-grid"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void joinRoom();
-                }}
-              >
-                <label>
-                  Name
-                  <input
-                    value={playerName}
-                    onChange={(e) => setPlayerName(e.target.value)}
-                    placeholder="Your name"
-                  />
-                </label>
-
-                <label>
-                  Room code
-                  <input
-                    value={roomCodeInput}
-                    onChange={(e) => setRoomCodeInput(e.target.value.toUpperCase())}
-                    placeholder="ABC123"
-                  />
-                </label>
-
-                <div className="actions align-right">
-                  <button type="submit" disabled={accessBusy}>Join</button>
-                </div>
-              </form>
-            )}
-          </section>
-          <RulesPanels />
-        </div>
-      )}
-
-      {room && isLobbyRoom && (
-        <div className="lobby-scroll room-waiting-scroll">
-          <div className="room-waiting-stack">
-            <MainBrandMark className="waiting-room-brand" />
-            <section className="panel waiting-room-panel">
-              <div className="waiting-room-shell">
-                <div className="lobby-pill-row">
-                  <button className="topbar-pill topbar-exit-pill" onClick={requestAbandonMatch} title="Leave room" aria-label="Leave room">
-                    <span className="material-symbols-rounded" aria-hidden>logout</span>
-                    Exit
-                  </button>
-                  <button
-                    className={`topbar-pill room-pill${room.shareable === false ? ' is-private' : ''}`}
-                    onClick={() => void copyLobbyRoomCode()}
-                    disabled={room.shareable === false}
-                    title={room.shareable === false ? 'Private CPU room' : 'Copy room code'}
-                  >
-                    <span className="topbar-pill-label">{room.displayCode ?? room.code}</span>
-                    {room.shareable === false ? (
-                      <span className="material-symbols-rounded" aria-hidden>lock</span>
-                    ) : (
-                      <span className="material-symbols-rounded" aria-hidden>content_copy</span>
-                    )}
-                  </button>
-                </div>
-
-                <div className="waiting-room-copy compact">
-                  <p className="waiting-room-eyebrow">Room lobby</p>
-                  <p className="waiting-room-copy-line">{waitingRoomMessage({ isHost, hostName: hostPlayer?.name })}</p>
-                </div>
-
-                <div className="waiting-hive-grid" aria-label="Players in room">
-                  {lobbySeats.map((player, index) => {
-                    if (!player) {
-                      return (
-                        <article key={`empty-seat-${index}`} className="waiting-player-card is-empty" aria-hidden>
-                          <div className="waiting-player-cell">
-                            <span className="material-symbols-rounded waiting-player-icon" aria-hidden>add</span>
-                          </div>
-                        </article>
-                      );
-                    }
-
-                    const playerColor = playerColorMap.get(player.id);
-                    return (
-                      <article
-                        key={player.id}
-                        className={`waiting-player-card${player.id === room.hostId ? ' is-host' : ''}${!player.connected ? ' is-disconnected' : ''}`}
-                        style={{ '--player-border-color': playerColor ?? undefined } as any}
-                      >
-                        <div className="waiting-player-cell">
-                          <span className="material-symbols-rounded waiting-player-icon" aria-hidden>
-                            person
-                          </span>
-                          <div className="waiting-player-body">
-                            <strong
-                              className={`waiting-player-name${player.name.length > 12 ? ' compact' : ''}${player.name.length > 18 ? ' tiny' : ''}`}
-                              style={{ color: playerColor }}
-                            >
-                              {player.name}
-                            </strong>
-                            <div className="waiting-player-head">
-                              {player.isCpu && <span className="waiting-player-badge cpu">CPU</span>}
-                            </div>
-                            {!player.connected && <span className="waiting-player-status">Reconnecting</span>}
-                          </div>
-                        </div>
-                      </article>
-                    );
-                  })}
-                </div>
-
-                <div className="waiting-room-footer">
-                  {isHost ? (
-                    <button className="command-button waiting-room-start" onClick={startGame} disabled={!startAction?.enabled}>
-                      Start
-                    </button>
-                  ) : (
-                    <p className="waiting-room-footnote">Host starts the run.</p>
-                  )}
-                </div>
-              </div>
-            </section>
-            <RulesPanels />
-          </div>
-        </div>
-      )}
+      {room && isLobbyRoom && <LobbyScreen room={room} playerId={playerId} canStart={Boolean(startAction?.enabled)} playerColors={playerColorMap} onStart={startGame} onRequestLeave={requestAbandonMatch} onCopyRoomLink={() => void copyLobbyRoomCode()} />}
 
       {room && !isLobbyRoom && (
-        <section className="game-layout">
-          <section className="game-shell">
-            <section className={`felt-stage${isPlaying ? ' is-playing' : ''}`}>
+        <GameScreen
+          isPlaying={Boolean(isPlaying)}
+          stage={
+            <>
               <TableBrandMark />
               {rivals.map((player) => {
                 const cardsRemaining = cardsRemainingForPlayer(player);
@@ -2418,99 +1678,10 @@ export function App() {
                 </div>
               )}
 
-              {game?.phase === 'victory' && (
-                <div className="result-overlay victory">
-                  <div className="confetti-layer" aria-hidden>
-                    {Array.from({ length: 24 }).map((_, i) => (
-                      <span key={`c-${i}`} className="confetti" style={{ '--i': i } as any} />
-                    ))}
-                  </div>
-                  <h2>YOU WON</h2>
-                  <p className="event-message-detail result-subtitle">{VICTORY_SUBTITLE}</p>
-                  {finalResults.length > 0 && (
-                    <div className={`final-scoreboard${showTwoColumnFinalScoreLayout ? ' two-columns' : ''}`} aria-label="Final synchronization ranking">
-                      {finalResults.map((result, index) => (
-                        <article
-                          key={result.playerId}
-                          className={`final-score-row podium-${podiumToneForRank(index)}${result.playerId === playerId ? ' is-me' : ''}`}
-                        >
-                          {podiumToneForRank(index) !== 'none' && (
-                            <span className={`final-score-crown-ribbon podium-${podiumToneForRank(index)}`} aria-label={`${podiumToneForRank(index)} podium`}>
-                              <span className="material-symbols-rounded" aria-hidden>crown</span>
-                            </span>
-                          )}
-                          <div className="final-score-rank">#{index + 1}</div>
-                          <div className="final-score-copy">
-                            <div className="final-score-head">
-                              <strong>{result.playerName}</strong>
-                              <span className={`final-score-band band-${timingFeedbackForBand(result.timingBand).toLowerCase()}`}>{timingFeedbackForBand(result.timingBand)}</span>
-                            </div>
-                          </div>
-                          <div className="final-score-value">
-                            <strong>{result.score}</strong>
-                          </div>
-                        </article>
-                      ))}
-                    </div>
-                  )}
-                  <div className="actions centered">
-                    {isHost ? (
-                      <button onClick={retryMatch}>Retry</button>
-                    ) : (
-                      <span className="muted">Waiting for the host to retry.</span>
-                    )}
-                    <button onClick={requestAbandonMatch}>Leave room</button>
-                  </div>
-                </div>
-              )}
-
-              {game?.phase === 'game-over' && (
-                <div className="result-overlay defeat">
-                  <h2>
-                    <span className="material-symbols-rounded inline-icon" aria-hidden>
-                      skull
-                    </span>{' '}
-                    YOU LOST
-                  </h2>
-                  <p className="event-message-detail result-subtitle">{DEFEAT_SUBTITLE}</p>
-                  {finalResults.length > 0 && (
-                    <div className={`final-scoreboard${showTwoColumnFinalScoreLayout ? ' two-columns' : ''}`} aria-label="Final synchronization ranking">
-                      {finalResults.map((result, index) => (
-                        <article
-                          key={result.playerId}
-                          className={`final-score-row podium-${podiumToneForRank(index)}${result.playerId === playerId ? ' is-me' : ''}`}
-                        >
-                          {podiumToneForRank(index) !== 'none' && (
-                            <span className={`final-score-crown-ribbon podium-${podiumToneForRank(index)}`} aria-label={`${podiumToneForRank(index)} podium`}>
-                              <span className="material-symbols-rounded" aria-hidden>crown</span>
-                            </span>
-                          )}
-                          <div className="final-score-rank">#{index + 1}</div>
-                          <div className="final-score-copy">
-                            <div className="final-score-head">
-                              <strong>{result.playerName}</strong>
-                              <span className={`final-score-band band-${timingFeedbackForBand(result.timingBand).toLowerCase()}`}>{timingFeedbackForBand(result.timingBand)}</span>
-                            </div>
-                          </div>
-                          <div className="final-score-value">
-                            <strong>{result.score}</strong>
-                          </div>
-                        </article>
-                      ))}
-                    </div>
-                  )}
-                  <div className="actions centered">
-                    {isHost ? (
-                      <button onClick={retryMatch}>Retry</button>
-                    ) : (
-                      <span className="muted">Waiting for the host to retry.</span>
-                    )}
-                    <button onClick={requestAbandonMatch}>Leave room</button>
-                  </div>
-                </div>
-              )}
-            </section>
-
+              <ResultsOverlay room={room} playerId={playerId} onRetry={() => void retryMatch()} onRequestLeave={requestAbandonMatch} />
+            </>
+          }
+          commandDeck={
             <section className="command-deck panel">
               <div className="command-panel">
                 <div className="command-top-row">
@@ -2638,7 +1809,8 @@ export function App() {
                 </div>
               </div>
             </section>
-          </section>
+          }
+        >
 
           {starDiscardFlight && (
             <div className="floating-card-layer" aria-hidden>
@@ -2690,7 +1862,7 @@ export function App() {
               ))}
             </div>
           </aside>
-        </section>
+        </GameScreen>
       )}
 
       {room && showExitConfirm && (

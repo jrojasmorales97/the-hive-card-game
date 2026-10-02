@@ -29,6 +29,7 @@ function fixture(now = 100) {
       cancel: (roomCode, key) => scheduled.delete(`${roomCode}:${key}`),
       cancelRoom: (roomCode) => { for (const key of scheduled.keys()) if (key.startsWith(`${roomCode}:`)) scheduled.delete(key); },
       cancelAll: () => scheduled.clear(),
+      rebaseRoom: () => undefined,
     },
     clock: { now: () => now },
     random: { next: () => { randomCalls += 1; return 0.999; } },

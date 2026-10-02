@@ -1,0 +1,88 @@
+- main [ref=f3e3]:
+  - generic [ref=f3e50]:
+    - generic [ref=f3e53]:
+      - generic [ref=f3e54]:
+        - button "Leave room" [ref=f3e55] [cursor=pointer]:
+          - generic [aria-hidden] [ref=f3e56]: logout
+          - text: Exit
+        - button "CPUON7" [disabled] [ref=f3e57]:
+          - generic [aria-hidden] [ref=f3e59]: lock
+      - generic [ref=f3e60]:
+        - paragraph [ref=f3e61]: Room lobby
+        - paragraph [ref=f3e62]: Share the code and start when ready.
+      - generic "Players in room" [ref=f3e63]:
+        - article [ref=f3e64]:
+          - generic [ref=f3e65]:
+            - generic [aria-hidden] [ref=f3e66]: person
+            - generic [ref=f3e67]:
+              - strong [ref=f3e68]: CPU 1
+              - generic [ref=f3e69]: CPU
+        - article [ref=f3e71]:
+          - generic [ref=f3e72]:
+            - generic [aria-hidden] [ref=f3e73]: person
+            - generic [ref=f3e74]:
+              - strong [ref=f3e75]: CPU 2
+              - generic [ref=f3e76]: CPU
+        - article [ref=f3e78]:
+          - generic [ref=f3e79]:
+            - generic [aria-hidden] [ref=f3e80]: person
+            - generic [ref=f3e81]:
+              - strong [ref=f3e82]: CPU 3
+              - generic [ref=f3e83]: CPU
+        - article [ref=f3e85]:
+          - generic [ref=f3e86]:
+            - generic [aria-hidden] [ref=f3e87]: person
+            - generic [ref=f3e88]:
+              - strong [ref=f3e89]: CPU 4
+              - generic [ref=f3e90]: CPU
+        - article [ref=f3e92]:
+          - generic [ref=f3e93]:
+            - generic [aria-hidden] [ref=f3e94]: person
+            - generic [ref=f3e95]:
+              - strong [ref=f3e96]: CPU 5
+              - generic [ref=f3e97]: CPU
+        - article [ref=f3e99]:
+          - generic [ref=f3e100]:
+            - generic [aria-hidden] [ref=f3e101]: person
+            - generic [ref=f3e102]:
+              - strong [ref=f3e103]: CPU 6
+              - generic [ref=f3e104]: CPU
+        - article [ref=f3e106]:
+          - generic [ref=f3e107]:
+            - generic [aria-hidden] [ref=f3e108]: person
+            - generic [ref=f3e109]:
+              - strong [ref=f3e110]: CPU 7
+              - generic [ref=f3e111]: CPU
+        - article [ref=f3e113]:
+          - generic [ref=f3e114]:
+            - generic [aria-hidden] [ref=f3e115]: person
+            - strong [ref=f3e117]: MCP tester
+      - button "Start" [ref=f3e119] [cursor=pointer]
+    - generic [ref=f3e120]:
+      - heading "How to play" [level=2] [ref=f3e121]
+      - region "How to play" [ref=f3e122]:
+        - generic [ref=f3e123]:
+          - generic [ref=f3e124]:
+            - generic [aria-hidden] [ref=f3e125]: hub
+            - heading "The Goal" [level=3] [ref=f3e126]
+          - paragraph [ref=f3e127]: Play all 100 cards in ascending order as a team - in complete silence. No talking, no signals, no gestures. Only shared instinct.
+        - generic [ref=f3e128]:
+          - generic [ref=f3e129]:
+            - generic [aria-hidden] [ref=f3e130]: style
+            - heading "Play Your Lowest" [level=3] [ref=f3e131]
+          - paragraph [ref=f3e132]: Each round you hold cards. When the timing feels right, play your lowest. If someone plays out of order, the team loses a life and all lower cards are discarded automatically.
+        - generic [ref=f3e133]:
+          - generic [ref=f3e134]:
+            - generic [aria-hidden] [ref=f3e135]: task_alt
+            - heading "Ready & Pause" [level=3] [ref=f3e136]
+          - paragraph [ref=f3e137]: Before each round starts, every player with cards must press Ready. Any player can call a Pause mid-game - the round resumes only when the players who still hold cards mark Ready again.
+        - generic [ref=f3e138]:
+          - generic [ref=f3e139]:
+            - generic [aria-hidden] [ref=f3e140]: auto_awesome
+            - heading "Lives, Stars & Rewards" [level=3] [ref=f3e141]
+          - paragraph [ref=f3e142]: Stars let the whole team discard their lowest card simultaneously. Clearing certain levels earns extra lives or stars as a reward.
+      - generic [aria-hidden] [ref=f3e143]:
+        - button [ref=f3e144] [cursor=pointer]
+        - button [ref=f3e145] [cursor=pointer]
+        - button [ref=f3e146] [cursor=pointer]
+        - button [ref=f3e147] [cursor=pointer]

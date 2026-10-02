@@ -1,4 +1,14 @@
 services:
+  e2e:
+    profiles: [test]
+    build:
+      context: .
+      dockerfile: apps/frontend/e2e/Dockerfile
+    ipc: host
+    volumes:
+      - ./apps/frontend/test-results:/workspace/apps/frontend/test-results
+      - ./apps/frontend/playwright-report:/workspace/apps/frontend/playwright-report
+
   backend:
     build:
       context: .

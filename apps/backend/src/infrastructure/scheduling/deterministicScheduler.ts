@@ -60,6 +60,14 @@ export class DeterministicScheduler implements Scheduler {
     return true;
   }
 
+  rebaseRoom(roomCode: string, previousVersion: number, nextVersion: number): void {
+    for (const job of this.jobs.values()) {
+      if (job.roomCode === roomCode && job.effect.expectedVersion === previousVersion) {
+        job.effect = { ...job.effect, expectedVersion: nextVersion };
+      }
+    }
+  }
+
   runDue(): number {
     let count = 0;
     while (this.runNextDue()) count += 1;

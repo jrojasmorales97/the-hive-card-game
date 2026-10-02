@@ -6,4 +6,6 @@ export interface Scheduler {
   cancel(roomCode: string, key: string): void;
   cancelRoom(roomCode: string): void;
   cancelAll(): void;
+  /** Preserve pending deadlines across a presence-only commit, without reviving stale jobs. */
+  rebaseRoom(roomCode: string, previousVersion: number, nextVersion: number): void;
 }

@@ -99,3 +99,22 @@ test('process scheduler owns timeout and delivery, rejecting stale and cancelled
   assert.ok(runtime.clearedTimeouts.length >= 3);
   assert.ok(runtime.clearedImmediates.length >= 1);
 });
+
+for (const kind of ['deterministic', 'process'] as const) test(`${kind} preserves pending deadlines across presence versions, never reviving stale work`, () => {
+  const clock = new ManualClock(10);
+  const runtime = new ControlledTimerRuntime();
+  const delivered: ApplicationEffect[] = [];
+  const scheduler = kind === 'process'
+    ? new ProcessScheduler(job => delivered.push(job), clock, runtime)
+    : new DeterministicScheduler(job => delivered.push(job), clock);
+  const original = effect('A', 'countdown-expired', 10);
+  scheduler.schedule('A', original.trigger, original);
+  scheduler.schedule('B', 'cpu-turn', effect('B', 'cpu-turn', 10));
+  scheduler.rebaseRoom('A', 1, 2);
+  scheduler.rebaseRoom('A', 1, 99);
+  scheduler.rebaseRoom('A', 2, 3);
+  if (scheduler instanceof DeterministicScheduler) scheduler.runDue();
+  else { runtime.fireTimeout(0); runtime.fireImmediate(0); runtime.fireTimeout(1); runtime.fireImmediate(1); }
+  assert.deepEqual(delivered, [{ ...original, expectedVersion: 3 }, effect('B', 'cpu-turn', 10)]);
+  assert.equal(original.expectedVersion, 1, 'do not mutate caller-owned effect');
+});

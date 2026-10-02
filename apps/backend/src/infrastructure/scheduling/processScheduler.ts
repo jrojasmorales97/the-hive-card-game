@@ -60,6 +60,14 @@ export class ProcessScheduler implements Scheduler {
     for (const job of [...this.jobs.values()]) this.cancel(job.roomCode, job.trigger);
   }
 
+  rebaseRoom(roomCode: string, previousVersion: number, nextVersion: number): void {
+    for (const job of this.jobs.values()) {
+      if (job.roomCode === roomCode && job.effect.expectedVersion === previousVersion) {
+        job.effect = { ...job.effect, expectedVersion: nextVersion };
+      }
+    }
+  }
+
   private deliver(id: string, job: ScheduledProcessJob): void {
     if (this.jobs.get(id) !== job) return;
     job.timeout = null;

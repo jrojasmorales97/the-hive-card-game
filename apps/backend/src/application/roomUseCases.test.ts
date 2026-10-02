@@ -9,7 +9,7 @@ function fixture() {
   const events: ApplicationEvent[] = [];
   const scheduled: string[] = [];
   const rooms = new InMemoryRoomRepository();
-  const useCases = new RoomUseCases({ rooms, publisher: { publish: (event) => events.push(event) }, scheduler: { schedule: (_room, key) => scheduled.push(key), cancel: () => undefined, cancelRoom: () => undefined, cancelAll: () => undefined }, random: { next: () => 0 } });
+  const useCases = new RoomUseCases({ rooms, publisher: { publish: (event) => events.push(event) }, scheduler: { schedule: (_room, key) => scheduled.push(key), cancel: () => undefined, cancelRoom: () => undefined, cancelAll: () => undefined, rebaseRoom: () => undefined }, random: { next: () => 0 } });
   return { useCases, rooms, events, scheduled };
 }
 
@@ -32,7 +32,7 @@ test('room codes consume the configured random source in stable order', () => {
   const random = new SequenceRandomSource([0, 0.5, 0.999, 0.25, 0.75, 0.125]);
   const useCases = new RoomUseCases({
     rooms: new InMemoryRoomRepository(), publisher: { publish: (event) => events.push(event) },
-    scheduler: { schedule: () => undefined, cancel: () => undefined, cancelRoom: () => undefined, cancelAll: () => undefined }, random,
+    scheduler: { schedule: () => undefined, cancel: () => undefined, cancelRoom: () => undefined, cancelAll: () => undefined, rebaseRoom: () => undefined }, random,
   });
 
   const created = useCases.createRoom({ playerId: 'host-0001', playerName: 'Host' });

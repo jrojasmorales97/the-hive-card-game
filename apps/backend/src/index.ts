@@ -1,15 +1,5 @@
-import Fastify from 'fastify';
-import cors from '@fastify/cors';
-import { Server } from 'socket.io';
-import type {
-  ClientToServerEvents,
-  GameLogEvent,
-  ServerToClientEvents,
-  GamePhase,
-  RoomStatus,
-} from '@the-hive/contracts';
 import { pathToFileURL } from 'node:url';
-import type { DomainFinalPlayerResult as FinalPlayerResult, DomainRewardType as RewardType } from './domain/model.js';
+import type { GameLogEvent } from '@the-hive/contracts';
 import {
   ERROR_LOCK_MS,
   LEVEL_COMPLETE_LOCK_MS,
@@ -28,62 +18,13 @@ import { ProcessScheduler } from './infrastructure/scheduling/processScheduler.j
 import { InMemoryRoomRepository } from './infrastructure/memory/inMemoryRoomRepository.js';
 import { SystemClock } from './infrastructure/runtime/systemClock.js';
 import { SystemRandomSource } from './infrastructure/runtime/systemRandomSource.js';
+import { CpuRoomAccess } from './infrastructure/cpu/cpuRoomAccess.js';
 import { SessionRegistry } from './transport/socket/sessionRegistry.js';
 import { RoomPresenter } from './transport/socket/roomPresenter.js';
 import { SocketEventPublisher } from './transport/socket/socketEventPublisher.js';
 import { registerRoomHandlers } from './transport/socket/registerRoomHandlers.js';
 import { registerGameHandlers } from './transport/socket/registerGameHandlers.js';
-
-type Player = {
-  id: string;
-  name: string;
-  connected: boolean;
-  ready: boolean;
-  hand: number[];
-  isCpu?: boolean;
-};
-
-type StarProposal = {
-  initiatorId: string;
-  acceptedBy: Set<string>;
-};
-
-type PileEntry = {
-  value: number;
-  playerId: string;
-  ts: number;
-  source: 'manual' | 'star';
-};
-
-type GameState = {
-  phase: GamePhase;
-  currentLevel: number;
-  maxLevel: number;
-  lives: number;
-  stars: number;
-  pile: number[];
-  pileHistory: PileEntry[];
-  lastPlayed: number | null;
-  rewardMap: Record<number, RewardType>;
-  mode: 'normal' | 'dev-cpu';
-  starProposal: StarProposal | null;
-  interactionLock: InteractionLock | null;
-  startedAt: number;
-  errorCounts: Record<string, number>;
-  finalResults: FinalPlayerResult[] | null;
-};
-
-type Room = {
-  code: string;
-  displayCode?: string;
-  shareable?: boolean;
-  hostId: string;
-  players: Record<string, Player>;
-  status: RoomStatus;
-  game: GameState | null;
-  version: number;
-  logs: GameLogEvent[];
-};
+import { createHttpSocketTransport } from './transport/http/createHttpSocketTransport.js';
 
 const roomRepository = new InMemoryRoomRepository();
 const sessions = new SessionRegistry();
@@ -91,8 +32,6 @@ let clock: Clock = new SystemClock();
 let randomSource: RandomSource = new SystemRandomSource();
 let timingScale = 1;
 let listening = false;
-
-const MAX_PLAYERS = 8;
 
 const PORT = Number(process.env.PORT ?? 3001);
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN ?? 'http://localhost:5173';
@@ -103,8 +42,8 @@ const ROUND_OUT_FLIP_MS = 520;
 const ROUND_OUT_UNFLIP_MS = 520;
 const RESTART_BANNER_DELAY_MS = 5000;
 
-let app: ReturnType<typeof Fastify>;
-let io: Server<ClientToServerEvents, ServerToClientEvents>;
+let app: Awaited<ReturnType<typeof createHttpSocketTransport>>['app'];
+let io: Awaited<ReturnType<typeof createHttpSocketTransport>>['io'];
 let roomUseCases: RoomUseCases;
 let gameUseCases: GameUseCases;
 let effectUseCases: EffectUseCases;
@@ -115,19 +54,7 @@ let applicationScheduler: Scheduler;
 let processScheduler: ProcessScheduler | undefined;
 
 async function createTransport(): Promise<void> {
-  app = Fastify({ logger: true });
-  await app.register(cors, {
-    origin: ALLOW_ALL_ORIGINS ? true : CLIENT_ORIGIN,
-    credentials: !ALLOW_ALL_ORIGINS,
-  });
-  app.get('/health', async () => ({ ok: true }));
-  io = new Server<ClientToServerEvents, ServerToClientEvents>(app.server, {
-    cors: {
-      origin: ALLOW_ALL_ORIGINS ? true : CLIENT_ORIGIN,
-      methods: ['GET', 'POST'],
-      credentials: !ALLOW_ALL_ORIGINS,
-    },
-  });
+  ({ app, io } = await createHttpSocketTransport(ALLOW_ALL_ORIGINS ? '*' : CLIENT_ORIGIN));
   roomPresenter = new RoomPresenter(clock);
   socketEventPublisher = new SocketEventPublisher(
     io,
@@ -142,6 +69,7 @@ async function createTransport(): Promise<void> {
     cancel: (roomCode, key) => processScheduler!.cancel(roomCode, key),
     cancelRoom: (roomCode) => processScheduler!.cancelRoom(roomCode),
     cancelAll: () => processScheduler!.cancelAll(),
+    rebaseRoom: (roomCode, previousVersion, nextVersion) => processScheduler!.rebaseRoom(roomCode, previousVersion, nextVersion),
   };
   roomUseCases = new RoomUseCases({
     rooms: roomRepository,
@@ -183,6 +111,11 @@ async function createTransport(): Promise<void> {
     roundFlipMs: () => scaledDuration(ROUND_OUT_FLIP_MS),
     cpuDelay: () => scaledDuration(DEV_CPU_PLAY_DELAY_MS),
   });
+  const cpuRooms = new CpuRoomAccess({
+    rooms: roomRepository,
+    random: randomSource,
+    onRoomCreated: (roomCode, cpuPlayers) => app.log.info({ roomCode, cpuPlayers }, 'CPU room ready'),
+  });
   registerGameHandlers({
     io,
     sessions,
@@ -198,30 +131,15 @@ async function createTransport(): Promise<void> {
     clock,
     getRoom: (code) => roomRepository.get(code),
     findRoomCodeByPlayer: (playerId) => roomRepository.findRoomCodeByPlayer(playerId),
-    resolveJoinRoom: (requestedRoomCode, playerId) => resolveJoinRoom(requestedRoomCode, playerId),
+    resolveJoinRoom: (requestedRoomCode, playerId) => cpuRooms.resolveJoinRoom(requestedRoomCode, playerId),
     isValidPlayerId,
-    onPlayerDisconnected: (roomCode, playerId) => { starUseCases.completeStarAnimation({ roomCode, playerId }); },
+    onPlayerDisconnected: (roomCode, playerId) => { starUseCases.playerDeparted({ roomCode, playerId }); },
   });
-}
-
-function generateRoomCode(length = 6): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let code = '';
-  for (let i = 0; i < length; i++) {
-    code += chars[Math.floor(randomSource.next() * chars.length)];
-  }
-  return code;
 }
 
 function clampNumber(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
   return Math.min(max, Math.max(min, Math.floor(value)));
-}
-
-function createUniqueRoomCode(): string {
-  let code = generateRoomCode();
-  while (roomRepository.has(code)) code = generateRoomCode();
-  return code;
 }
 
 function scaledDuration(durationMs: number): number {
@@ -232,56 +150,6 @@ function isValidPlayerId(playerId: string): boolean {
   return /^[a-zA-Z0-9_-]{8,64}$/.test(playerId);
 }
 
-function parseCpuRoomCode(roomCode: string): number | null {
-  const match = /^CPUON([1-7])$/.exec(roomCode);
-  if (!match) return null;
-  return clampNumber(Number(match[1]), 1, MAX_PLAYERS - 1);
-}
-
-function createCpuRoom(roomCode: string, cpuPlayers: number, displayCode = roomCode): Room {
-  const players: Record<string, Player> = {};
-  for (let index = 1; index <= cpuPlayers; index += 1) {
-    const id = `${roomCode.toLowerCase()}-cpu-${String(index).padStart(2, '0')}`;
-    players[id] = {
-      id,
-      name: `CPU ${index}`,
-      connected: true,
-      ready: true,
-      hand: [],
-      isCpu: true,
-    };
-  }
-
-  const hostId = Object.keys(players)[0];
-  const room: Room = {
-    code: roomCode,
-    displayCode,
-    shareable: false,
-    hostId,
-    status: 'lobby',
-    players,
-    game: null,
-    version: 0,
-    logs: [],
-  };
-
-  roomRepository.save(room as unknown as ApplicationRoom, 0);
-  app.log.info({ roomCode, cpuPlayers }, 'CPU room ready');
-  return room;
-}
-
-function resolveJoinRoom(requestedRoomCode: string, playerId: string): { roomCode: string } | { error: string } {
-  const room = roomRepository.get(requestedRoomCode);
-  if (!room) {
-    const cpuPlayers = parseCpuRoomCode(requestedRoomCode);
-    if (!cpuPlayers) return { error: 'That room does not exist' };
-    const roomCode = createUniqueRoomCode();
-    createCpuRoom(roomCode, cpuPlayers, requestedRoomCode);
-    return { roomCode };
-  }
-  if (room.shareable === false && !room.players[playerId]) return { error: 'This private room cannot be shared' };
-  return { roomCode: room.code };
-}
 
 export type ServerStartOptions = {
   port?: number;
@@ -299,8 +167,8 @@ export async function startServer(options: ServerStartOptions = {}): Promise<{ u
 
   clock = new SystemClock();
   randomSource = new SystemRandomSource(options.random);
-  if (!app) await createTransport();
   timingScale = Number.isFinite(options.timingScale) ? Math.max(0, options.timingScale!) : 1;
+  if (!app) await createTransport();
   const host = options.host ?? '0.0.0.0';
   await app.listen({ port: options.port ?? PORT, host });
   listening = true;
@@ -315,11 +183,29 @@ export function resetServerForTests(): void {
   sessions.clear();
 }
 
+/** In-process test seam; never registered on the production HTTP transport. */
+export function seedRoomForTests(room: ApplicationRoom): void {
+  applicationScheduler.cancelRoom(room.code);
+  const previous = roomRepository.get(room.code);
+  roomRepository.save(room, previous?.version ?? 0);
+  socketEventPublisher.emitRoomUpdate(room.code, false);
+}
+
+export function inspectRoomForTests(code: string): ApplicationRoom | undefined {
+  return roomRepository.get(code);
+}
+
+export function deleteRoomForTests(code: string): void {
+  applicationScheduler.cancelRoom(code);
+  for (const player of Object.values(roomRepository.get(code)?.players ?? {})) sessions.removePlayer(player.id);
+  roomRepository.delete(code);
+}
+
 export async function stopServer(): Promise<void> {
   resetServerForTests();
   if (listening) await io.close();
   listening = false;
-  app = undefined as unknown as ReturnType<typeof Fastify>;
+  app = undefined as unknown as Awaited<ReturnType<typeof createHttpSocketTransport>>['app'];
   processScheduler = undefined;
   clock = new SystemClock();
   randomSource = new SystemRandomSource();

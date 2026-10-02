@@ -1,10 +1,28 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { acceptStar, cancelStar, proposeStar, rejectStar, settleStar } from './star.js';
+import { acceptStar, cancelStar, proposeStar, rejectStar, settleStar, refreshStarConsensus } from './star.js';
 import type { DomainMatch } from './model.js';
 
 const input = { now: 100, resolutionMs: 50, roundFlipMs: 7 };
+
+test('presence reevaluates consensus once without manufacturing acceptance events', () => {
+  const initial = match();
+  const empty = refreshStarConsensus(initial, input);
+  assert.equal(empty.ok, true);
+  const proposed = proposeStar(initial, 'alpha', input);
+  assert.ok(proposed.ok);
+  proposed.state.players.bravo.connected = false;
+  const resolved = refreshStarConsensus(proposed.state, input);
+  assert.ok(resolved.ok);
+  assert.equal(resolved.state.game?.stars, 0);
+  assert.equal(resolved.events.filter(event => event.type === 'star-accepted').length, 0);
+  assert.equal(resolved.effects.length, 1);
+  const duplicate = refreshStarConsensus(resolved.state, input);
+  assert.ok(duplicate.ok);
+  assert.deepEqual(duplicate.effects, []);
+  assert.equal(duplicate.state.game?.stars, 0);
+});
 
 function match(): DomainMatch {
   return {

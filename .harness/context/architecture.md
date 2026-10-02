@@ -9,17 +9,17 @@
 # Capas
 
 - Orquestacion de repo: documentacion raiz y Compose en `README.md`, `docker-compose.yml`, `render.yaml`, `business.md` y `architecture.md`.
-- Backend autoritativo: `apps/backend/src/index.ts` es composition root y lifecycle de Fastify/Socket.IO; construye infraestructura, casos de uso y registros de transporte.
+- Backend autoritativo: `apps/backend/src/index.ts` es composition root y lifecycle; construye infraestructura, casos de uso y registros de transporte. `transport/http/` crea Fastify/CORS y la ruta health, mientras `transport/socket/` contiene sesión, presenters, publisher y handlers Socket.IO.
 - Backend helper: `application/` orquesta comandos y efectos, `infrastructure/` posee repositorio, reloj, azar y scheduler, y `transport/socket/` conserva parsers, sesión, presenters, publisher y handlers. Las reglas viven en `src/domain/`.
-- Frontend shell: `apps/frontend/src/main.tsx` monta `App`, mientras `apps/frontend/src/App.tsx` concentra conexion Socket.IO, estado React, overlays y acciones del usuario.
+- Frontend shell: `apps/frontend/src/main.tsx` monta `App`; `app/gateway/` concentra Socket.IO y `app/state/useRoomSession.ts` posee identidad, snapshots, conexión y comandos. `App.tsx` conserva estado y efectos de presentación, overlays y animaciones.
 - Frontend helper: `apps/frontend/src/*.ts` extrae logica pura de sincronizacion, layout, copy y UI (`roomSync.ts`, `connectionStatus.ts`, `gameUi.ts`, `lobbyUi.ts`, `handLayout.ts`, `starUi.ts`, `finalScoreUi.ts`, `messageTiming.ts`).
-- Tests co-localizados: backend y frontend guardan tests unitarios junto a los modulos en `apps/backend/src/*.test.ts` y `apps/frontend/src/*.test.ts`.
+- Tests co-localizados: backend y frontend guardan tests unitarios junto a sus módulos; el frontend también descubre recursivamente pruebas de `tooling/`.
 - Límite de dominio: `apps/backend/src/domain/` contiene datos y decisiones puras. `setup.ts` recibe mazo/reloj/duraciones; `round.ts` ready/pausa/countdown; `cards.ts` jugada/penalización/descartes; `star.ts` consenso/preview/settlement; `progression.ts` recompensas, avance, locks de nivel y terminales; `scoring.ts` ranking con tiempo inyectado. `StarUseCases` coordina acks visuales persistidos sin sockets y `index.ts` solo compone dependencias.
 
 # Estrategia de carpetas
 
-- Estado actual backend: `apps/backend/src/index.ts` es entrypoint de composición; `src/domain/`, `src/application/`, `src/infrastructure/` y `src/transport/` tienen propietarios separados.
-- Estado actual frontend: `apps/frontend/src/main.tsx` arranca la app, `src/App.tsx` concentra conexion, estado, animacion y UI, los helpers/tests estan planos bajo `src/` y `src/styles.css` conserva la cascada global.
+- Estado actual backend: `apps/backend/src/index.ts` es entrypoint de composición; `src/domain/`, `src/application/`, `src/infrastructure/` y `src/transport/` tienen propietarios separados. El acceso de desarrollo `CPUON1` a `CPUON7` vive en `infrastructure/cpu/cpuRoomAccess.ts`, fuera de los handlers Socket.IO.
+- Estado actual frontend: `apps/frontend/src/main.tsx` arranca la app; `src/app/gateway/roomGateway.ts` es el único importador de `socket.io-client` y `src/app/state/useRoomSession.ts` coordina identidad persistida, estado de servidor, correlación de snapshots, resync y conexión. `src/App.tsx` compone las APIs públicas de `features/room-access`, `features/lobby`, `features/game` y `features/results`; el primer slice de `game` conserva la presentación y animaciones acopladas como children de su contenedor. `src/shared/ui/` contiene solo la marca, fondo y reglas ya reutilizados por acceso y lobby; `src/styles.css` conserva la cascada global.
 - `packages/contracts/`: paquete ESM local `@the-hive/contracts`, fuente canónica de wire types, parsers runtime y mapas Socket.IO. Se divide por estado, acciones, logs y familias de eventos; no contiene estado interno ni reglas de juego.
 - `.harness/`: artefactos SDD y templates de regeneracion (`templates/`, `context/`, `plans/`, `implementations/`, `reviews/`).
 - `.opencode/`: configuracion local de agentes, comandos y skills; la skill de proyecto observada es `ux-ui-design`.
@@ -114,7 +114,7 @@ apps/frontend/src/
 - `game/` mantiene como internals los subflujos que comparten mesa y animaciones. Estrella, mano/pila, ready/pausa y logs solo se elevan a features hermanas si adquieren lifecycle y API realmente independientes.
 - `shared/` no importa `app/` ni `features/`. Un modulo entra en `shared/` solo despues de tener al menos dos consumidores reales; no se crean `utils/`, `components/` o `hooks/` globales como cajones de sastre.
 - Cada feature y cada limite de `app/` expone una API pequena mediante su `index.ts`; consumidores externos no importan rutas internas. No se crea un barrel global de todo `src/`.
-- Tests, modelos, componentes y estilos especificos se co-localizan con su propietario. Antes del primer movimiento se cambia `npm test` y `test:coverage` para descubrir `src/**/*.test.ts(x)` de forma recursiva y se prueba que ningun test queda omitido.
+- Tests, modelos, componentes y estilos especificos se co-localizan con su propietario. `npm test` y `test:coverage` descubren `src/**/*.test.ts` de forma recursiva antes del primer movimiento; `tooling/frontendBoundaries.ts` impide imports de `socket.io-client` fuera de `app/gateway/`, de `app/` desde features y de capas superiores desde shared.
 - `styles.css` conserva inicialmente su ubicacion/cascada para no mezclar estructura y regresion visual. Se mueve a `app/styles/` o se reparte por feature solo despues de caracterizar orden, breakpoints y selectores compartidos; no se introduce un design system ni CSS Modules por defecto.
 - Direccion permitida: `main -> app`; `app -> features + shared`; `app/state -> app/gateway + shared`; `features -> shared`; `shared` no depende de capas superiores.
 
@@ -128,17 +128,21 @@ apps/frontend/src/
 
 # Convenciones
 
+- Regresión de navegador: `apps/frontend/e2e/`, `playwright.config.ts` y `apps/backend/tooling/e2eServer.ts`. `docker compose run --build --rm --no-deps e2e` levanta un stack aislado y prepara salas deterministas mediante control loopback separado; producción no registra esas rutas. CI ejecuta la misma batería y conserva trazas/informe.
+- La correlación frontend comienza en versión `-1` para aceptar la primera sala con versión `0`. El polling usa solo `room:resync`; `room:join` se reserva a acceso/reconexión.
+- Los commits de presencia conservan deadlines de trabajos pendientes mediante `Scheduler.rebaseRoom(previousVersion, nextVersion)`: solo cambia la versión de jobs aún vigentes en la versión anterior. Se mantienen fase/lock/deadline y las defensas contra retry, cancelación, borrado y efectos obsoletos.
+
 - TypeScript estricto en ambos paquetes. Fuente: `apps/backend/tsconfig.json`, `apps/frontend/tsconfig.json`.
 - Backend en `NodeNext` con imports ESM terminados en `.js` desde archivos TS compilados. Fuente: `apps/backend/tsconfig.json`, imports de `apps/backend/src/index.ts`.
 - Frontend con `moduleResolution: Bundler`, `jsx: react-jsx` y `noEmit: true`. Fuente: `apps/frontend/tsconfig.json`.
 - Aplicaciones principales de archivo unico con helpers extraidos, sin router ni libreria externa de estado global. Fuente: `apps/frontend/src/App.tsx`, `apps/frontend/package.json`, arbol `apps/frontend/src/`.
-- Estado publico y privado separados explicitamente: el backend emite `room:update`, `player:state` y `room:snapshot`; el frontend recompone los fragmentos con `roomSync.ts`. Fuente: `apps/backend/src/index.ts`, `apps/frontend/src/roomSync.ts`.
+- Estado publico y privado separados explicitamente: el backend emite `room:update`, `player:state` y `room:snapshot`; `app/state/useRoomSession.ts` recompone los fragmentos con `roomSync.ts` y los aplica de forma atómica. Fuente: `apps/backend/src/index.ts`, `apps/frontend/src/app/state/useRoomSession.ts`.
 - Las fronteras Socket.IO importan `ClientToServerEvents`/`ServerToClientEvents` desde `@the-hive/contracts`; el backend valida payloads externos con parsers antes de aplicar reglas. Eventos reservados de Socket.IO no pertenecen a esos mapas.
 - Tests junto al codigo que validan helpers puros y reglas aisladas. Fuente: `apps/backend/src/*.test.ts`, `apps/frontend/src/*.test.ts`.
-- No aplica: no se observaron scripts de linting ni formateo declarados en los manifests inspeccionados. Fuente: `apps/backend/package.json`, `apps/frontend/package.json`.
+- No hay linter o formateador configurado: TypeScript estricto, tests, cobertura, builds y checks AST son los quality gates activos. No se añadió una herramienta de estilo porque no existía una convención formateada que preservar.
 - `DomainResult` es discriminado: el rechazo solo contiene error y no se aplica; el éxito entrega estado completo, eventos y efectos declarativos. El adaptador fusiona exclusivamente estado funcional y conserva metadata de transporte.
 - El dominio no importa contracts wire, Fastify, Socket.IO, `@fastify/*`, `node:*`, shell, frontend ni infraestructura, ni usa imports dinámicos, `process`, `Date.now`, `Math.random` o timers. `npm run check:layers` lo verifica por AST en `src/domain/**` y también rechaza aristas prohibidas desde `application/`.
-- `test`, `test:coverage` y `build` ejecutan antes `check:domain`; la cobertura usa el reporter de Node para exigir >=80% de líneas, branches y funciones sobre dominio, aplicación y la infraestructura medible de memoria/runtime, excluyendo tests y módulos declarativos. `check:layers` clasifica dominio, aplicación, infraestructura y transporte; permite infraestructura hacia puertos de aplicación y rechaza imports inversos, imports dinámicos no literales y globals operativos en capas lógicas.
+- `test`, `test:coverage` y `build` ejecutan antes `check:domain`; la cobertura usa el reporter de Node para exigir >=80% de líneas, branches y funciones sobre dominio, aplicación y la infraestructura medible de memoria/runtime, excluyendo tests y módulos declarativos. `check:layers` clasifica dominio, aplicación, infraestructura y transporte; permite infraestructura hacia puertos de aplicación y rechaza imports inversos, imports dinámicos no literales y globals operativos en capas lógicas. En frontend, el mismo gate resuelve imports relativos, limita Socket.IO a gateway, prohíbe imports de `app/` en features, imports entre features, rutas internas de features y ciclos.
 - Los efectos de setup/ronda/cartas/progresion/estrella declaran `trigger`, `dueAt` y expectativas de fase, razon y deadline. `ProcessScheduler` reemplaza trabajo por `{ roomCode, trigger }`; `effectUseCases.ts` materializa los efectos, incluido `star-settled`, con sala y versión esperadas. Al vencer, el dominio rechaza fase, lock o deadline que ya no coinciden; una versión distinta, retry o sala eliminada tampoco guarda ni publica. Los handlers solo validan wire, resuelven sesión, invocan casos de uso y traducen el ack.
 - `domain/cards.ts` es el único propietario de mínimo propio, bloqueantes, penalización de vida, `errorCounts`, descartes de error, outcomes de carta y la elección del siguiente CPU. `GameUseCases.playCard` y `EffectUseCases` solo adaptan/persisten los hechos de dominio; este último programa y reinyecta `error-expired`, `round-flip-expired`, `round-unflip-expired` y `cpu-turn` sin recalcular una regla.
 - `domain/star.ts` es el único propietario de propuesta, votos, consenso, consumo, preview, settlement y outcome de estrella. `StarUseCases` conserva solo la espera visual por identidad estable y `EffectUseCases` vuelve al settlement con el efecto decidido; transporte e infraestructura no calculan participantes de negocio ni mutan manos, estrellas, fase o locks.
@@ -210,14 +214,14 @@ apps/frontend/src/
 
 ## Testing
 
-- `npm test` en `apps/backend`: ejecuta `check:domain` y los tests raíz y de `src/domain/`. Fuente: `apps/backend/package.json`.
-- `npm run test:coverage` en `apps/backend`: ejecuta `check:domain`, cobertura experimental del test runner de Node y el gate del límite lógico. Fuente: `apps/backend/package.json`.
-- `npm test` en `apps/frontend`: ejecuta `node --import tsx --test src/*.test.ts`. Fuente: `apps/frontend/package.json`.
-- `npm run test:coverage` en `apps/frontend`: ejecuta cobertura experimental del test runner de Node. Fuente: `apps/frontend/package.json`.
+- `npm run check` en cada app: ejecuta límites, typecheck y tests. `npm test` conserva el check de límites y descubre tests recursivamente. Fuente: manifests de ambas apps.
+- `npm run typecheck` en cada app: ejecuta TypeScript estricto sin emitir. `npm run build` conserva el check de límites y el typecheck antes del empaquetado. Fuente: manifests de ambas apps.
+- `npm run test:coverage` en backend: ejecuta `check:domain`, cobertura experimental del test runner de Node y el gate del límite lógico. Fuente: `apps/backend/package.json`.
+- `npm test` y `npm run test:coverage` en frontend: usan `tooling/runTests.ts` para descubrir `*.test.ts` recursivamente en `src/` y `tooling/`. Fuente: `apps/frontend/package.json`.
 
 ## Linting
 
-- No aplica: no hay scripts `lint` ni dependencias de ESLint/Prettier declaradas en `apps/backend/package.json` o `apps/frontend/package.json`.
+- No aplica: no hay scripts `lint` ni dependencias de ESLint/Prettier; el estilo no tiene una convención automatizada previa que endurecer.
 
 # Contrato realtime baseline
 

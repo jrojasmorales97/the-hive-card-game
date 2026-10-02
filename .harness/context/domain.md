@@ -7,7 +7,7 @@ The Hive es una implementacion web de un juego cooperativo de cartas en tiempo r
 - El producto actual esta dividido en un backend Fastify + Socket.IO (`apps/backend`) y un frontend React + Vite (`apps/frontend`), coordinados en desarrollo por `docker-compose.yml`.
 - El backend mantiene el estado de salas y partidas en el repositorio en memoria de `infrastructure/memory/`; no se observo persistencia durable ni base de datos declarada en `apps/backend/package.json`.
 - La experiencia ya cubre lobby multijugador, reconexion, ready cooperativo, juego sin turnos, penalizacion por errores, pausa, estrella por consenso, progresion de niveles, derrota, victoria y ranking final de sincronizacion. `index.ts` compone infraestructura, aplicación y transporte; las decisiones viven en `domain/setup.ts`, `domain/round.ts`, `domain/cards.ts`, `domain/star.ts`, `domain/progression.ts` y `domain/scoring.ts`.
-- El frontend conserva una sola pantalla principal en `apps/frontend/src/App.tsx` y apoya la UI con helpers puros como `roomSync.ts`, `connectionStatus.ts`, `gameUi.ts`, `lobbyUi.ts`, `handLayout.ts`, `starUi.ts`, `finalScoreUi.ts` y `messageTiming.ts`.
+- El frontend compone features visibles desde `apps/frontend/src/App.tsx`: `room-access` cubre identidad y acceso/reconexión visible; `lobby` cubre sala previa, host e inicio; `game` conserva mesa, mano, pila, ready, pausa, estrella, nivel y logs; `results` presenta terminales, ranking y retry. La sesión y autoridad remota permanecen en `app/state/` y `app/gateway/`.
 - `README.md` aun presenta el producto como "Fase 1 + base de Fase 2" y marca "Modo ciego" y "endurecer reglas avanzadas y anadir tests de motor" como trabajo futuro; esa documentacion parece parcialmente desactualizada frente a funcionalidades ya presentes como scoring final y modo CPU de desarrollo.
 
 # Log de requerimientos
@@ -22,16 +22,18 @@ The Hive es una implementacion web de un juego cooperativo de cartas en tiempo r
 | Desconocido | Mostrar un ranking final de sincronizacion con puntuacion, banda de timing y feedback textual por jugador. | Implementado | `apps/backend/src/domain/scoring.ts`, `apps/backend/src/domain/progression.ts`, `apps/frontend/src/finalScoreUi.ts` |
 | Desconocido | Ofrecer un modo ciego de juego boca abajo con validacion al final del nivel. | Pendiente | `README.md` |
 | Desconocido | Endurecer reglas avanzadas y anadir tests de motor. | Pendiente | `README.md` |
-| 2026-07-18 | Inicio manual por host sin ready previo; contradice README. | Por confirmar | `GameUseCases.startGame`, `domain/room.ts` |
-| 2026-07-18 | `availableActions` es consejo UI; handlers siguen siendo autoridad. | Por confirmar | `privateState.ts`, handlers |
-| 2026-07-18 | Desconectados conservan cartas sin TTL; identidad por `playerId` y host migran. | Por confirmar | `markSocketDisconnected`, `room:join`, `pickNextHost` |
-| 2026-07-18 | Balance, ready y consenso usan criterios distintos de registro/conexión/cartas. | Por confirmar | `startGameInRoom`, `roundParticipants.ts`, estrella |
-| 2026-07-18 | Leave en partida, scoring, versiones, estrella tras disconnect y terminales son ambiguos. | Por confirmar | `index.ts` |
- | 2026-07-18 | `room:kick` solo está implementado en backend. | Por confirmar | `index.ts` |
+| 2026-07-18 | Inicio manual por host sin ready previo; contradice README. | Implementado | `GameUseCases.startGame`, `domain/setup.ts` |
+| 2026-07-18 | `availableActions` es consejo UI; handlers siguen siendo autoridad. | Implementado | `privateState.ts`, handlers |
+| 2026-07-18 | Desconectados conservan cartas sin TTL; identidad por `playerId` y host migran. | Implementado | `domain/room.ts`, `RoomUseCases` |
+| 2026-07-18 | Balance, ready y consenso usan criterios distintos de registro/conexión/cartas. | Implementado | `domain/setup.ts`, `domain/participants.ts`, `domain/star.ts` |
+| 2026-07-18 | Leave en partida, scoring, versiones, estrella tras disconnect y terminales son ambiguos. | Implementado | `RoomUseCases`, `domain/scoring.ts`, `StarUseCases`, contracts |
+| 2026-07-18 | `room:kick` solo está implementado en backend. | Pendiente | `transport/socket/registerRoomHandlers.ts` |
 | 2026-07-18 | El tráfico que cumple el contrato Socket.IO conserva eventos, campos legacy, versiones y acks; input malformado se rechaza sin mutar la partida ni cerrar la conexión. | Implementado | `packages/contracts`, handlers Socket.IO |
 | 2026-07-18 | El estado público no puede incluir mano ni `socketId`; la mano y acciones pertenecen exclusivamente al envelope privado del propietario. | Implementado | `packages/contracts/src/state.ts`, serializers |
 
 # Funcionalidades
+
+- Regresión E2E de acciones de partida: consultar `apps/frontend/e2e/README.md`. Se verifica CPUON7 hasta victoria y estados preparados para errores, estrellas y reconexiones. Una pausa automática tras error normaliza CPU-ready igual que estrella; si solo CPU conserva cartas, continúa automáticamente. La salida/desconexión de un votante reevalúa el consenso de estrella usando solo los votos existentes y la población conectada actual.
 
 - Lobby y presencia: crear sala, unirse, expulsar, detectar host, mostrar jugadores conectados y logs de sala; evidencia en `apps/backend/src/index.ts` y helpers de UI en `apps/frontend/src/lobbyUi.ts`.
 - Reconexion y resync: el cliente persiste `playerId`, `playerName` y ultima sala; el backend admite rejoin por `playerId` y devuelve snapshots versionados mediante `room:resync`; evidencia en `apps/frontend/src/App.tsx` y `apps/backend/src/index.ts`.

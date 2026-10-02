@@ -1,0 +1,144 @@
+- main [ref=f2e3]:
+  - generic [ref=f2e148]:
+    - button "Private CPU room CPUON7" [disabled] [ref=f2e150]:
+      - generic [ref=f2e151]: CPUON7
+      - generic [aria-hidden] [ref=f2e152]: lock
+    - generic [ref=f2e153]:
+      - button "Log" [ref=f2e154] [cursor=pointer]:
+        - generic [aria-hidden] [ref=f2e155]: notes
+        - text: Log
+      - button "Leave room" [ref=f2e156] [cursor=pointer]:
+        - generic [aria-hidden] [ref=f2e157]: logout
+        - text: Exit
+  - generic [ref=f2e158]:
+    - generic [ref=f2e159]:
+      - generic [ref=f2e160]:
+        - article [ref=f2e161]:
+          - generic [ref=f2e162]:
+            - generic "Ready" [ref=f2e163]: task_alt
+            - generic "CPU player" [ref=f2e164]: CPU
+            - strong [ref=f2e165]: CPU 1
+            - generic [ref=f2e166]: x1
+          - generic [aria-hidden] [ref=f2e167]:
+            - generic [ref=f2e168]: DONE
+            - strong [ref=f2e169]: CPU 1
+        - article [ref=f2e170]:
+          - generic [ref=f2e171]:
+            - generic "Ready" [ref=f2e172]: task_alt
+            - generic "CPU player" [ref=f2e173]: CPU
+            - strong [ref=f2e174]: CPU 2
+            - generic [ref=f2e175]: x1
+          - generic [aria-hidden] [ref=f2e176]:
+            - generic [ref=f2e177]: DONE
+            - strong [ref=f2e178]: CPU 2
+        - article [ref=f2e179]:
+          - generic [ref=f2e180]:
+            - generic "Ready" [ref=f2e181]: task_alt
+            - generic "CPU player" [ref=f2e182]: CPU
+            - strong [ref=f2e183]: CPU 3
+            - generic [ref=f2e184]: x1
+          - generic [aria-hidden] [ref=f2e185]:
+            - generic [ref=f2e186]: DONE
+            - strong [ref=f2e187]: CPU 3
+        - article [ref=f2e188]:
+          - generic [ref=f2e189]:
+            - generic "Ready" [ref=f2e190]: task_alt
+            - generic "CPU player" [ref=f2e191]: CPU
+            - strong [ref=f2e192]: CPU 4
+            - generic [ref=f2e193]: x1
+          - generic [aria-hidden] [ref=f2e194]:
+            - generic [ref=f2e195]: DONE
+            - strong [ref=f2e196]: CPU 4
+        - article [ref=f2e197]:
+          - generic [ref=f2e198]:
+            - generic "Ready" [ref=f2e199]: task_alt
+            - generic "CPU player" [ref=f2e200]: CPU
+            - strong [ref=f2e201]: CPU 5
+            - generic [ref=f2e202]: x1
+          - generic [aria-hidden] [ref=f2e203]:
+            - generic [ref=f2e204]: DONE
+            - strong [ref=f2e205]: CPU 5
+        - article [ref=f2e206]:
+          - generic [ref=f2e207]:
+            - generic "Ready" [ref=f2e208]: task_alt
+            - generic "CPU player" [ref=f2e209]: CPU
+            - strong [ref=f2e210]: CPU 6
+            - generic [ref=f2e211]: x1
+          - generic [aria-hidden] [ref=f2e212]:
+            - generic [ref=f2e213]: DONE
+            - strong [ref=f2e214]: CPU 6
+        - article [ref=f2e215]:
+          - generic [ref=f2e216]:
+            - generic "Ready" [ref=f2e217]: task_alt
+            - generic "CPU player" [ref=f2e218]: CPU
+            - strong [ref=f2e219]: CPU 7
+            - generic [ref=f2e220]: x1
+          - generic [aria-hidden] [ref=f2e221]:
+            - generic [ref=f2e222]: DONE
+            - strong [ref=f2e223]: CPU 7
+        - article [ref=f2e224]:
+          - generic [ref=f2e225]:
+            - generic "Ready" [ref=f2e266]: task_alt
+            - generic "Host" [ref=f2e227]: crown
+            - strong [ref=f2e228]: Host
+            - generic [ref=f2e229]: x1
+          - generic [aria-hidden] [ref=f2e230]:
+            - generic [ref=f2e231]: DONE
+            - strong [ref=f2e232]: Host
+        - button "Center pile. Open game log" [ref=f2e233] [cursor=pointer]:
+          - generic [ref=f2e234]: Play the first card
+        - generic [ref=f2e267]: "3"
+      - generic [ref=f2e235]:
+        - generic [ref=f2e236]:
+          - generic "Player resources" [ref=f2e238]:
+            - generic [ref=f2e239]:
+              - strong [ref=f2e240]:
+                - generic [aria-hidden] [ref=f2e241]: favorite
+                - text: Lives
+              - text: "5"
+            - generic [ref=f2e242]:
+              - strong [ref=f2e243]:
+                - generic [aria-hidden] [ref=f2e244]: star
+                - text: Stars
+              - text: "1"
+            - generic [ref=f2e245]:
+              - strong [ref=f2e246]:
+                - generic [aria-hidden] [ref=f2e247]: floor
+                - text: Level
+              - text: 1/5
+          - button "The hive wakes in 3" [disabled] [ref=f2e269]:
+            - generic [aria-hidden] [ref=f2e270]: hive
+            - text: The hive wakes in 3
+        - generic [ref=f2e252]:
+          - generic "Upcoming cards" [ref=f2e253]
+          - button "48 48 48" [disabled] [ref=f2e271]:
+            - generic [ref=f2e272]: "48"
+            - generic [ref=f2e273]: "48"
+            - generic [ref=f2e274]: "48"
+    - complementary "Game log":
+      - generic:
+        - strong: Game log
+        - button "Close game log":
+          - generic [aria-hidden]: close
+      - generic:
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: play_arrow
+          - paragraph: Game started
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: person_add
+          - paragraph: Host joined the room

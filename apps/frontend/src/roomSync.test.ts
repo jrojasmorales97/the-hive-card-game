@@ -12,6 +12,13 @@ import {
   shouldApplyDecorativeEvent,
 } from './roomSync.js';
 
+test('the first version-zero room snapshot is applied once', () => {
+  const snapshot = { version: 0, serverTime: 1000, publicState: { room: 'new' }, privateState: { hand: [] } };
+  const first = applyPrivateSnapshot(createSnapshotCorrelationState(), snapshot);
+  assert.deepEqual(first.applied, snapshot);
+  assert.equal(applyPrivateSnapshot(first.state, snapshot).applied, null);
+});
+
 test('applyPrivateSnapshot ignores stale versions', () => {
   const initial = createSnapshotCorrelationState<{ room: string }, { hand: number[] }>();
   const { state } = applyPrivateSnapshot(initial, {

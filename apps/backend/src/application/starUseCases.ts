@@ -1,5 +1,5 @@
 import { nextCpuCard } from '../domain/cards.js';
-import { acceptStar, cancelStar, proposeStar, rejectStar, type StarInput } from '../domain/star.js';
+import { acceptStar, cancelStar, proposeStar, rejectStar, refreshStarConsensus, type StarInput } from '../domain/star.js';
 import type { DomainEffect, DomainEvent, DomainResult } from '../domain/result.js';
 import { applyDomainResult, toDomainMatch } from './domainAdapter.js';
 import { dispatchApplicationResult } from './dispatcher.js';
@@ -22,7 +22,7 @@ export type StarUseCaseDependencies = {
 };
 
 export type StarCommand = { roomCode: string; playerId: string };
-type StarAction = 'propose' | 'accept' | 'cancel' | 'reject';
+type StarAction = 'propose' | 'accept' | 'cancel' | 'reject' | 'presence';
 
 function starEvents(roomCode: string, events: readonly DomainEvent[]): ApplicationEvent[] {
   const translated: ApplicationEvent[] = [];
@@ -41,6 +41,12 @@ function error(result: DomainResult): ApplicationResult<never> {
 /** Socket-free owner of proposal, voting, visual acknowledgement and cancellation. */
 export class StarUseCases {
   constructor(private readonly dependencies: StarUseCaseDependencies) {}
+
+  playerDeparted(command: StarCommand): void {
+    const room = this.dependencies.rooms.get(command.roomCode);
+    if (room?.game?.starProposal) this.execute({ roomCode: room.code, playerId: room.hostId }, 'presence');
+    this.completeStarAnimation(command);
+  }
 
   proposeStar(command: StarCommand): ApplicationResult<{ room: ApplicationRoom }> {
     return this.execute(command, 'propose');
@@ -94,7 +100,8 @@ export class StarUseCases {
     if (!room || !room.players[command.playerId] || !room.game) return applicationRejected('invalid-state', 'Invalid game state');
     const now = this.dependencies.clock.now();
     const input: StarInput = { now, resolutionMs: this.dependencies.resolutionMs(), roundFlipMs: this.dependencies.roundFlipMs() };
-    const result = action === 'propose' ? proposeStar(toDomainMatch(room), command.playerId, input)
+    const result = action === 'presence' ? refreshStarConsensus(toDomainMatch(room), input)
+      : action === 'propose' ? proposeStar(toDomainMatch(room), command.playerId, input)
       : action === 'accept' ? acceptStar(toDomainMatch(room), command.playerId, input)
         : action === 'cancel' ? cancelStar(toDomainMatch(room), command.playerId, now)
           : rejectStar(toDomainMatch(room), command.playerId, now);

@@ -5,9 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
-    "test": "node --import tsx --test src/*.test.ts",
-    "test:coverage": "node --import tsx --test --experimental-test-coverage src/*.test.ts",
+    "typecheck:e2e": "tsc -p tsconfig.e2e.json",
+    "test:e2e": "npm run typecheck:e2e && playwright test",
+    "check:layers": "node --import tsx tooling/frontendBoundaries.ts",
+    "typecheck": "tsc -b --pretty false",
+    "check": "npm run check:layers && npm run typecheck && npm test",
+    "build": "npm run check:layers && npm run typecheck && vite build",
+    "test": "npm run check:layers && node --import tsx tooling/runTests.ts",
+    "test:coverage": "npm run check:layers && node --import tsx tooling/runTests.ts --coverage",
     "preview": "vite preview --host 0.0.0.0 --port 4173"
   },
   "dependencies": {
@@ -17,6 +22,7 @@
     "socket.io-client": "^4.8.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/node": "^22.13.10",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",

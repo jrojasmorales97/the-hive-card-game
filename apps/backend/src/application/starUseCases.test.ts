@@ -38,6 +38,7 @@ function fixture() {
       cancel: (roomCode: string, key: string) => scheduled.delete(`${roomCode}:${key}`),
       cancelRoom: (roomCode: string) => { for (const key of scheduled.keys()) if (key.startsWith(`${roomCode}:`)) scheduled.delete(key); },
       cancelAll: () => scheduled.clear(),
+      rebaseRoom: () => undefined,
     },
     clock: { now: () => now },
   };
@@ -164,6 +165,7 @@ test('an active disconnect closes only that visual wait and settlement still use
       cancel: (roomCode, key) => state.scheduled.delete(`${roomCode}:${key}`),
       cancelRoom: () => undefined,
       cancelAll: () => state.scheduled.clear(),
+      rebaseRoom: () => undefined,
     },
     random: { next: () => 0 },
   });

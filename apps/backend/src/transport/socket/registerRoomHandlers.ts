@@ -83,6 +83,7 @@ export function registerRoomHandlers(dependencies: RegisterRoomHandlersDependenc
       const current = context(socket.id);
       if (!current) return ack?.({ ok: false, error: 'You are not in a room' });
       const result = dependencies.useCases.leaveRoom(current);
+      if (result.ok) dependencies.onPlayerDisconnected(current.roomCode, current.playerId);
       return ack?.(result.ok ? { ok: true } : { ok: false, error: result.error.message });
     });
 

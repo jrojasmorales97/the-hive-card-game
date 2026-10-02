@@ -54,6 +54,7 @@ export class RoomUseCases {
       next.hostId = command.playerId;
     }
     const saved = this.dependencies.rooms.save(next, room.version);
+    this.dependencies.scheduler.rebaseRoom(saved.code, room.version, saved.version);
     const event = { type: existing ? 'room-reconnected' as const : 'room-joined' as const, roomCode: saved.code, playerId: command.playerId, playerName: saved.players[command.playerId].name };
     return this.complete(applicationSucceeded({ room: saved, reconnected: Boolean(existing) }, [{ type: 'room-saved', room: saved, expectedVersion: room.version }], [event]));
   }
@@ -96,6 +97,7 @@ export class RoomUseCases {
     next.players[player.id] = { ...player, connected: false, ready: false };
     if (next.hostId === player.id) next.hostId = Object.values(next.players).find((entry) => entry.connected)?.id ?? Object.keys(next.players)[0];
     const saved = this.dependencies.rooms.save(next, room.version);
+    this.dependencies.scheduler.rebaseRoom(saved.code, room.version, saved.version);
     return this.complete(applicationSucceeded({ room: saved }, [{ type: 'room-saved', room: saved, expectedVersion: room.version }, { type: 'player-presence-changed', roomCode: saved.code, playerId: player.id, connected: false }], [{ type: 'room-disconnected', roomCode: saved.code, playerId: player.id, playerName: player.name }]));
   }
 
@@ -130,6 +132,8 @@ export class RoomUseCases {
     if (next.hostId === player.id) next.hostId = Object.values(next.players).find((entry) => entry.connected)?.id ?? Object.keys(next.players)[0];
     const saved = this.dependencies.rooms.save(next, room.version);
     const events: ApplicationEvent[] = [...leadingEvents];
+    if (saved.game) this.dependencies.scheduler.rebaseRoom(saved.code, room.version, saved.version);
+    else this.dependencies.scheduler.cancelRoom(saved.code);
     if (saved.hostId !== room.hostId) events.push({ type: 'room-host-changed', roomCode: saved.code, fromPlayerId: room.hostId, toPlayerId: saved.hostId });
     events.push({ type: 'room-left', roomCode: saved.code, playerId: player.id, playerName: player.name });
     void removedBy;

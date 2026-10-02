@@ -681,7 +681,7 @@ Validacion:
 | 04 Dominio | Completada | Reglas puras sin duplicacion; evidencia: `.harness/implementations/2026-07-21/bdf87991-extraer-reglas-de-negocio-a-un-dominio-puro-task-05.md` |
 | 05 Aplicacion | Completada | Casos de uso sin transporte; evidencia: `.harness/implementations/2026-07-21/d70c49e2-capa-de-aplicacion-para-orquestar-el-dominio-sin-socketio-task-05.md` |
 | 06 Infraestructura | Completada | Puertos, adaptadores deterministas, ownership de efectos y cleanup verificados; evidencia: `.harness/implementations/2026-07-23/c4e8a1f2-encapsular-infraestructura-backend-detras-de-puertos-manteniendo-comportamiento-in-memory-task-02.md` |
-| 07 Socket.IO | Disponible | Transporte delgado |
-| 08 Estado frontend | Bloqueada por 07 | Gateway y ownership claros |
-| 09 Features frontend | Bloqueada por 08 | Features aisladas |
-| 10 Hardening | Bloqueada por 09 | Contexto consistente, enforcement local y legacy eliminado |
+| 07 Socket.IO | Completada | Adaptadores HTTP/Socket.IO delgados, `index.ts` como composition root, privacidad y reconexión cubiertas por integración |
+| 08 Estado frontend | Completada | Gateway único, sesión/correlación en `app/state`, tests recursivos y límite de Socket.IO verificados |
+| 09 Features frontend | Completada | Features aisladas, APIs públicas y límites verificados |
+| 10 Hardening | Completada | Contexto consolidado, CI Docker equivalente, checks de capas/API/ciclos y quality gates activos |

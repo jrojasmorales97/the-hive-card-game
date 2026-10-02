@@ -52,6 +52,16 @@ Servicios:
 
 ## Validación
 
+Regresión E2E de partidas en Chromium (incluye backend y frontend aislados):
+
+```bash
+docker compose run --build --rm --no-deps e2e
+```
+
+La batería prepara estados deterministas y cubre acciones, errores, consenso, reconexión,
+progresión, finales y una partida CPUON7 completa. [Matriz y guía E2E](apps/frontend/e2e/README.md).
+CI guarda el informe HTML y las trazas de fallos.
+
 ```bash
 docker compose run --build --rm --no-deps backend npm run check:layers
 docker compose run --build --rm --no-deps backend npm test

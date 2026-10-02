@@ -1,0 +1,215 @@
+- main [ref=f1e3]:
+  - generic [ref=f1e4]:
+    - button "Private CPU room CPUON1" [disabled] [ref=f1e6]:
+      - generic [ref=f1e7]: CPUON1
+      - generic [aria-hidden] [ref=f1e8]: lock
+    - generic [ref=f1e9]:
+      - button "Log" [ref=f1e10] [cursor=pointer]:
+        - generic [aria-hidden] [ref=f1e11]: notes
+        - text: Log
+      - button "Leave room" [ref=f1e12] [cursor=pointer]:
+        - generic [aria-hidden] [ref=f1e13]: logout
+        - text: Exit
+  - generic [ref=f1e14]:
+    - generic [ref=f1e15]:
+      - generic [ref=f1e16]:
+        - article [ref=f1e17]:
+          - generic [ref=f1e18]:
+            - generic "Ready" [ref=f1e19]: task_alt
+            - generic "Host" [ref=f1e20]: crown
+            - generic "CPU player" [ref=f1e21]: CPU
+            - strong [ref=f1e22]: CPU 1
+            - generic [ref=f1e23]: x1
+          - generic [aria-hidden] [ref=f1e24]:
+            - generic [ref=f1e25]: DONE
+            - strong [ref=f1e26]: CPU 1
+        - article [ref=f1e27]:
+          - generic [ref=f1e28]:
+            - generic "Waiting" [ref=f1e29]: hourglass_top
+            - strong [ref=f1e30]: Host
+            - generic [ref=f1e31]: x1
+          - generic [aria-hidden] [ref=f1e32]:
+            - generic [ref=f1e33]: DONE
+            - strong [ref=f1e34]: Host
+        - button "Center pile. Open game log" [ref=f1e35] [cursor=pointer]:
+          - generic [ref=f1e36]: Play the first card
+      - generic [ref=f1e37]:
+        - generic [ref=f1e38]:
+          - generic "Player resources" [ref=f1e40]:
+            - generic [ref=f1e41]:
+              - strong [ref=f1e42]:
+                - generic [aria-hidden] [ref=f1e43]: favorite
+                - text: Lives
+              - text: "2"
+            - generic [ref=f1e44]:
+              - strong [ref=f1e45]:
+                - generic [aria-hidden] [ref=f1e46]: star
+                - text: Stars
+              - text: "1"
+            - generic [ref=f1e47]:
+              - strong [ref=f1e48]:
+                - generic [aria-hidden] [ref=f1e49]: floor
+                - text: Level
+              - text: 1/12
+          - button "Ready" [ref=f1e51] [cursor=pointer]:
+            - generic [aria-hidden] [ref=f1e52]: task_alt
+            - text: Ready
+        - generic [ref=f1e54]:
+          - generic "Upcoming cards" [ref=f1e55]
+          - generic [ref=f1e81]: No card
+    - complementary "Game log":
+      - generic:
+        - strong: Game log
+        - button "Close game log":
+          - generic [aria-hidden]: close
+      - generic:
+        - article:
+          - generic [aria-hidden]: person_remove
+          - paragraph: Host disconnected from the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: person_remove
+          - paragraph: Host disconnected from the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room

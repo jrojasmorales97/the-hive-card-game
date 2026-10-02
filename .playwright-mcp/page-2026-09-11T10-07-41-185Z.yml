@@ -1,0 +1,81 @@
+- main [ref=e3]:
+  - generic [ref=e114]:
+    - button "Private CPU room CPUON1" [disabled] [ref=e116]:
+      - generic [ref=e117]: CPUON1
+      - generic [aria-hidden] [ref=e118]: lock
+    - generic [ref=e119]:
+      - button "Log" [ref=e120] [cursor=pointer]:
+        - generic [aria-hidden] [ref=e121]: notes
+        - text: Log
+      - button "Leave room" [ref=e122] [cursor=pointer]:
+        - generic [aria-hidden] [ref=e123]: logout
+        - text: Exit
+  - generic [ref=e126]:
+    - article [ref=e127]:
+      - generic [ref=e128]:
+        - generic "Ready" [ref=e129]: task_alt
+        - generic "CPU player" [ref=e130]: CPU
+        - strong [ref=e131]: CPU 1
+        - generic [ref=e132]: x1
+      - generic [aria-hidden] [ref=e133]:
+        - generic [ref=e134]: DONE
+        - strong [ref=e135]: CPU 1
+    - article [ref=e136]:
+      - generic [ref=e137]:
+        - generic "Waiting" [ref=e138]: hourglass_top
+        - generic "Host" [ref=e139]: crown
+        - strong [ref=e140]: Host
+        - generic [ref=e141]: x1
+      - generic [aria-hidden] [ref=e142]:
+        - generic [ref=e143]: DONE
+        - strong [ref=e144]: Host
+    - button "Center pile. Open game log" [ref=e145] [cursor=pointer]:
+      - generic [ref=e146]: Play the first card
+    - generic [ref=e147]:
+      - generic [ref=e148]:
+        - generic "Player resources" [ref=e150]:
+          - generic [ref=e151]:
+            - strong [ref=e152]:
+              - generic [aria-hidden] [ref=e153]: favorite
+              - text: Lives
+            - text: "2"
+          - generic [ref=e154]:
+            - strong [ref=e155]:
+              - generic [aria-hidden] [ref=e156]: star
+              - text: Stars
+            - text: "1"
+          - generic [ref=e157]:
+            - strong [ref=e158]:
+              - generic [aria-hidden] [ref=e159]: floor
+              - text: Level
+            - text: 1/12
+        - button "Ready" [ref=e161] [cursor=pointer]:
+          - generic [aria-hidden] [ref=e162]: task_alt
+          - text: Ready
+      - generic [ref=e164]:
+        - generic "Upcoming cards" [ref=e165]
+        - button "86 86 86" [disabled] [ref=e192]:
+          - generic [ref=e193]: "86"
+          - generic [ref=e194]: "86"
+          - generic [ref=e195]: "86"
+    - complementary "Game log":
+      - generic:
+        - strong: Game log
+        - button "Close game log":
+          - generic [aria-hidden]: close
+      - generic:
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: play_arrow
+          - paragraph: Game started
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: wifi
+          - paragraph: Host reconnected to the room
+        - article:
+          - generic [aria-hidden]: person_add
+          - paragraph: Host joined the room

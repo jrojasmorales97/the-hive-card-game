@@ -98,18 +98,9 @@ export class EffectUseCases {
     if (!resolved.ok) return applicationRejected('invalid-state', resolved.error);
     const outcome = resolved.events.find((event) => event.type === 'star-outcome');
     if (outcome?.outcome === 'pause') {
-      const participant = readyParticipants({ players: Object.values(resolved.state.players) })[0];
-      if (!participant) return applicationRejected('invalid-state', 'Invalid game state');
-      const continued = setRoundReady(resolved.state, participant.id, participant.ready, {
-        now,
-        countdownMs: this.dependencies.countdownMs,
-      });
+      const continued = this.continueAutomaticPause(resolved, now);
       if (!continued.ok) return applicationRejected('invalid-state', continued.error);
-      resolved = accepted(
-        continued.state,
-        [...resolved.events, ...continued.events],
-        [...resolved.effects, ...continued.effects],
-      );
+      resolved = continued;
     }
     const applied = applyDomainResult(room, resolved);
     if (!applied.applied) return applicationRejected('invalid-state', 'Invalid game state');
@@ -164,12 +155,20 @@ export class EffectUseCases {
   private resolveCardOutcome(first: Accepted, actorId: string, now: number): DomainResult {
     const outcome = first.events.find((event): event is Extract<DomainEvent, { type: 'card-outcome' }> => event.type === 'card-outcome');
     if (!outcome) return first;
-    if (outcome.outcome === 'pause') return first;
+    if (outcome.outcome === 'pause') return this.continueAutomaticPause(first, now);
     const terminal = outcome.outcome === 'game-over'
       ? finishGame(first.state, actorId, 'game-over', now)
       : completeLevel(first.state, actorId, { now, completedAt: now });
     if (!terminal.ok) return terminal;
     return accepted(terminal.state, [...first.events, ...terminal.events], [...first.effects, ...terminal.effects]);
+  }
+
+  private continueAutomaticPause(result: Accepted, now: number): DomainResult {
+    const participant = readyParticipants({ players: Object.values(result.state.players) })[0];
+    if (!participant) return result;
+    const continued = setRoundReady(result.state, participant.id, participant.ready, { now, countdownMs: this.dependencies.countdownMs });
+    if (!continued.ok) return continued;
+    return accepted(continued.state, [...result.events, ...continued.events], [...result.effects, ...continued.effects]);
   }
 
   private applicationEvents(roomCode: string, events: readonly DomainEvent[], trigger: string): ApplicationEvent[] {

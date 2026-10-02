@@ -1,0 +1,49 @@
+- main [ref=f3e3]:
+  - generic [ref=f3e4]:
+    - generic [ref=f3e6]:
+      - heading [level=1] [ref=f3e7]:
+        - img "The Hive" [ref=f3e8]
+      - paragraph [ref=f3e9]: No talking | No signaling | In order
+    - generic [ref=f3e10]:
+      - tablist "Room access" [ref=f3e11]:
+        - tab "Join room" [selected] [ref=f3e12] [cursor=pointer]
+        - tab "Create room" [ref=f3e13] [cursor=pointer]
+      - generic [ref=f3e14]:
+        - generic [ref=f3e15]:
+          - text: Name
+          - textbox "Name" [ref=f3e16]:
+            - /placeholder: Your name
+            - text: Host
+        - generic [ref=f3e17]:
+          - text: Room code
+          - textbox "Room code" [ref=f3e18]:
+            - /placeholder: ABC123
+        - button "Join" [ref=f3e20] [cursor=pointer]
+    - generic [ref=f3e21]:
+      - heading "How to play" [level=2] [ref=f3e22]
+      - region "How to play" [ref=f3e23]:
+        - generic [ref=f3e24]:
+          - generic [ref=f3e25]:
+            - generic [aria-hidden] [ref=f3e26]: hub
+            - heading "The Goal" [level=3] [ref=f3e27]
+          - paragraph [ref=f3e28]: Play all 100 cards in ascending order as a team - in complete silence. No talking, no signals, no gestures. Only shared instinct.
+        - generic [ref=f3e29]:
+          - generic [ref=f3e30]:
+            - generic [aria-hidden] [ref=f3e31]: style
+            - heading "Play Your Lowest" [level=3] [ref=f3e32]
+          - paragraph [ref=f3e33]: Each round you hold cards. When the timing feels right, play your lowest. If someone plays out of order, the team loses a life and all lower cards are discarded automatically.
+        - generic [ref=f3e34]:
+          - generic [ref=f3e35]:
+            - generic [aria-hidden] [ref=f3e36]: task_alt
+            - heading "Ready & Pause" [level=3] [ref=f3e37]
+          - paragraph [ref=f3e38]: Before each round starts, every player with cards must press Ready. Any player can call a Pause mid-game - the round resumes only when the players who still hold cards mark Ready again.
+        - generic [ref=f3e39]:
+          - generic [ref=f3e40]:
+            - generic [aria-hidden] [ref=f3e41]: auto_awesome
+            - heading "Lives, Stars & Rewards" [level=3] [ref=f3e42]
+          - paragraph [ref=f3e43]: Stars let the whole team discard their lowest card simultaneously. Clearing certain levels earns extra lives or stars as a reward.
+      - generic [aria-hidden] [ref=f3e44]:
+        - button [ref=f3e45] [cursor=pointer]
+        - button [ref=f3e46] [cursor=pointer]
+        - button [ref=f3e47] [cursor=pointer]
+        - button [ref=f3e48] [cursor=pointer]

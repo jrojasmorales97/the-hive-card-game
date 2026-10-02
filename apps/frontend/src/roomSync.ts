@@ -25,7 +25,7 @@ export type SnapshotCorrelationState<TPublicState, TPrivateState> = {
 
 export function createSnapshotCorrelationState<TPublicState, TPrivateState>(): SnapshotCorrelationState<TPublicState, TPrivateState> {
   return {
-    lastAppliedVersion: 0,
+    lastAppliedVersion: -1,
     pendingPublic: {},
     pendingPrivate: {},
   };

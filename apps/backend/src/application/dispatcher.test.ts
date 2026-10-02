@@ -32,6 +32,7 @@ test('dispatcher commits work directives in cancel, event, and replace order', (
     cancel: (_roomCode, trigger) => calls.push(`cancel:${trigger}`),
     cancelRoom: () => calls.push('cancel-room'),
     cancelAll: () => calls.push('cancel-all'),
+    rebaseRoom: () => undefined,
   });
 
   assert.deepEqual(calls, ['cancel-room', 'cancel:star-settled', 'event', 'cancel:cpu-turn', 'schedule:cpu-turn']);

@@ -56,3 +56,9 @@ export function countdownValueFromRemaining(ms: number): 3 | 2 | 1 | 'play' | nu
   if (ms > 1000) return 2;
   return 1;
 }
+
+export function nextCountdownRefreshDelayMs(remainingMs: number): number | null {
+  if (remainingMs <= 0) return null;
+  const nextBoundary = remainingMs > 2000 ? 2000 : remainingMs > 1000 ? 1000 : 0;
+  return Math.ceil(remainingMs - nextBoundary) + 1;
+}

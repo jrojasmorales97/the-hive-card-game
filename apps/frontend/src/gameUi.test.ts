@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   countdownValueFromRemaining,
+  nextCountdownRefreshDelayMs,
   handDealAnimationMode,
   handDealStateKey,
   isCountdownLockActive,
@@ -62,6 +63,16 @@ test('countdown values match remaining time windows', () => {
   assert.equal(countdownValueFromRemaining(1500), 2);
   assert.equal(countdownValueFromRemaining(500), 1);
   assert.equal(countdownValueFromRemaining(0), null);
+});
+
+test('countdown refresh crosses each boundary even if a timer fires just before it', () => {
+  assert.equal(countdownValueFromRemaining(2000.6), 3);
+  assert.equal(nextCountdownRefreshDelayMs(2000.6), 2);
+  assert.equal(countdownValueFromRemaining(1998.6), 2);
+  assert.equal(nextCountdownRefreshDelayMs(1998.6), 1000);
+  assert.equal(nextCountdownRefreshDelayMs(1000.6), 2);
+  assert.equal(nextCountdownRefreshDelayMs(0.6), 2);
+  assert.equal(nextCountdownRefreshDelayMs(0), null);
 });
 
 test('lobbyStartDealDelayMs keeps the first in-game deal immediate', () => {

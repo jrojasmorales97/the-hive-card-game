@@ -50,6 +50,15 @@ function acceptCpuVotes(next: DomainMatch, events: DomainEvent[]): void {
   });
 }
 
+/** Presence changes alter the consensus population, never the votes already cast. */
+export function refreshStarConsensus(match: DomainMatch, input: StarInput): DomainResult {
+  if (!match.game?.starProposal) return succeeded(copyMatch(match));
+  const next = copyMatch(match);
+  const events: DomainEvent[] = [];
+  const effects = startResolution(next, next.game!.starProposal!.initiatorId, input, events);
+  return succeeded(next, events, effects);
+}
+
 /** Opens a proposal and records the initiator plus connected CPU votes without mutation. */
 export function proposeStar(match: DomainMatch, actorId: string, input: StarInput): DomainResult {
   const decision = evaluateGameTransition(machineState(match, actorId), 'propose-star', input.now);

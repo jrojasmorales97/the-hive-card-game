@@ -1,0 +1,191 @@
+- main [ref=f3e3]:
+  - generic [ref=f3e148]:
+    - button "Private CPU room CPUON7" [disabled] [ref=f3e150]:
+      - generic [ref=f3e151]: CPUON7
+      - generic [aria-hidden] [ref=f3e152]: lock
+    - generic [ref=f3e153]:
+      - button "Log" [ref=f3e154] [cursor=pointer]:
+        - generic [aria-hidden] [ref=f3e155]: notes
+        - text: Log
+      - button "Leave room" [ref=f3e156] [cursor=pointer]:
+        - generic [aria-hidden] [ref=f3e157]: logout
+        - text: Exit
+  - generic [ref=f3e158]:
+    - generic [ref=f3e159]:
+      - generic [ref=f3e160]:
+        - article [ref=f3e161]:
+          - generic [ref=f3e162]:
+            - generic "Ready" [ref=f3e279]: task_alt
+            - generic "CPU player" [ref=f3e164]: CPU
+            - strong [ref=f3e165]: CPU 1
+            - generic [ref=f3e166]: x2
+          - generic [aria-hidden] [ref=f3e167]:
+            - generic [ref=f3e168]: DONE
+            - strong [ref=f3e169]: CPU 1
+        - article [ref=f3e170]:
+          - generic [ref=f3e171]:
+            - generic "Ready" [ref=f3e280]: task_alt
+            - generic "CPU player" [ref=f3e173]: CPU
+            - strong [ref=f3e174]: CPU 2
+            - generic [ref=f3e175]: x2
+          - generic [aria-hidden] [ref=f3e176]:
+            - generic [ref=f3e177]: DONE
+            - strong [ref=f3e178]: CPU 2
+        - article [ref=f3e179]:
+          - generic [ref=f3e180]:
+            - generic "Ready" [ref=f3e281]: task_alt
+            - generic "CPU player" [ref=f3e182]: CPU
+            - strong [ref=f3e183]: CPU 3
+            - generic [ref=f3e184]: x2
+          - generic [aria-hidden] [ref=f3e185]:
+            - generic [ref=f3e186]: DONE
+            - strong [ref=f3e187]: CPU 3
+        - article [ref=f3e188]:
+          - generic [ref=f3e189]:
+            - generic "Ready" [ref=f3e282]: task_alt
+            - generic "CPU player" [ref=f3e191]: CPU
+            - strong [ref=f3e192]: CPU 4
+            - generic [ref=f3e193]: x2
+          - generic [aria-hidden] [ref=f3e194]:
+            - generic [ref=f3e195]: DONE
+            - strong [ref=f3e196]: CPU 4
+        - article [ref=f3e197]:
+          - generic [ref=f3e198]:
+            - generic "Ready" [ref=f3e283]: task_alt
+            - generic "CPU player" [ref=f3e200]: CPU
+            - strong [ref=f3e201]: CPU 5
+            - generic [ref=f3e202]: x2
+          - generic [aria-hidden] [ref=f3e203]:
+            - generic [ref=f3e204]: DONE
+            - strong [ref=f3e205]: CPU 5
+        - article [ref=f3e206]:
+          - generic [ref=f3e207]:
+            - generic "Ready" [ref=f3e284]: task_alt
+            - generic "CPU player" [ref=f3e209]: CPU
+            - strong [ref=f3e210]: CPU 6
+            - generic [ref=f3e211]: x2
+          - generic [aria-hidden] [ref=f3e212]:
+            - generic [ref=f3e213]: DONE
+            - strong [ref=f3e214]: CPU 6
+        - article [ref=f3e215]:
+          - generic [ref=f3e216]:
+            - generic "Ready" [ref=f3e285]: task_alt
+            - generic "CPU player" [ref=f3e218]: CPU
+            - strong [ref=f3e219]: CPU 7
+            - generic [ref=f3e220]: x2
+          - generic [aria-hidden] [ref=f3e221]:
+            - generic [ref=f3e222]: DONE
+            - strong [ref=f3e223]: CPU 7
+        - article [ref=f3e224]:
+          - generic [ref=f3e225]:
+            - generic "Ready" [ref=f3e286]: task_alt
+            - generic "Host" [ref=f3e227]: crown
+            - strong [ref=f3e228]: MCP tester
+            - generic [ref=f3e229]: x2
+          - generic [aria-hidden] [ref=f3e230]:
+            - generic [ref=f3e231]: DONE
+            - strong [ref=f3e232]: MCP tester
+        - button "Center pile. Open game log" [ref=f3e233] [cursor=pointer]:
+          - generic "Round reward" [ref=f3e287]:
+            - generic [ref=f3e288]: Reward
+            - generic [aria-hidden] [ref=f3e289]: star
+        - generic [ref=f3e290]: "3"
+      - generic [ref=f3e235]:
+        - generic [ref=f3e236]:
+          - generic "Player resources" [ref=f3e238]:
+            - generic [ref=f3e239]:
+              - strong [ref=f3e240]:
+                - generic [aria-hidden] [ref=f3e241]: favorite
+                - text: Lives
+              - text: "5"
+            - generic [ref=f3e242]:
+              - strong [ref=f3e243]:
+                - generic [aria-hidden] [ref=f3e244]: star
+                - text: Stars
+              - text: "0"
+            - generic [ref=f3e245]:
+              - strong [ref=f3e246]:
+                - generic [aria-hidden] [ref=f3e247]: floor
+                - text: Level
+              - text: 2/5
+          - button "The hive wakes in 3" [disabled] [ref=f3e292]:
+            - generic [aria-hidden] [ref=f3e293]: hive
+            - text: The hive wakes in 3
+        - generic [ref=f3e252]:
+          - generic "Upcoming cards" [ref=f3e253]: "39"
+          - button "19 19 19" [disabled] [ref=f3e295]:
+            - generic [ref=f3e296]: "19"
+            - generic [ref=f3e297]: "19"
+            - generic [ref=f3e298]: "19"
+    - complementary "Game log":
+      - generic:
+        - strong: Game log
+        - button "Close game log":
+          - generic [aria-hidden]: close
+      - generic:
+        - article:
+          - generic [aria-hidden]: play_lesson
+          - paragraph: Round 2 ready
+        - article:
+          - generic [aria-hidden]: task_alt
+          - paragraph: Level 1 cleared
+        - article:
+          - generic [aria-hidden]: delete
+          - paragraph: Star discard 89 from CPU 5
+        - article:
+          - generic [aria-hidden]: delete
+          - paragraph: Star discard 82 from CPU 1
+        - article:
+          - generic [aria-hidden]: delete
+          - paragraph: Star discard 63 from CPU 3
+        - article:
+          - generic [aria-hidden]: delete
+          - paragraph: Star discard 56 from CPU 4
+        - article:
+          - generic [aria-hidden]: delete
+          - paragraph: Star discard 55 from MCP tester
+        - article:
+          - generic [aria-hidden]: delete
+          - paragraph: Star discard 48 from CPU 2
+        - article:
+          - generic [aria-hidden]: delete
+          - paragraph: Star discard 20 from CPU 7
+        - article:
+          - generic [aria-hidden]: delete
+          - paragraph: Star discard 5 from CPU 6
+        - article:
+          - generic [aria-hidden]: auto_awesome
+          - paragraph: Star discarded the lowest cards
+        - article:
+          - generic [aria-hidden]: handshake
+          - paragraph: CPU 7 accepted using a star
+        - article:
+          - generic [aria-hidden]: handshake
+          - paragraph: CPU 6 accepted using a star
+        - article:
+          - generic [aria-hidden]: handshake
+          - paragraph: CPU 5 accepted using a star
+        - article:
+          - generic [aria-hidden]: handshake
+          - paragraph: CPU 4 accepted using a star
+        - article:
+          - generic [aria-hidden]: handshake
+          - paragraph: CPU 3 accepted using a star
+        - article:
+          - generic [aria-hidden]: handshake
+          - paragraph: CPU 2 accepted using a star
+        - article:
+          - generic [aria-hidden]: handshake
+          - paragraph: CPU 1 accepted using a star
+        - article:
+          - generic [aria-hidden]: star
+          - paragraph: MCP tester proposed using a star
+        - article:
+          - generic [aria-hidden]: pause_circle
+          - paragraph: MCP tester requested pause
+        - article:
+          - generic [aria-hidden]: play_arrow
+          - paragraph: Game started
+        - article:
+          - generic [aria-hidden]: person_add
+          - paragraph: MCP tester joined the room
